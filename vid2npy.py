@@ -24,14 +24,12 @@ def extract_opencv(filename):
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--data_folder', type=str, required=True)
+    parser.add_argument('-d', '--data_folder', type=str, required=True)
     args = parser.parse_args()
     return args
 
 
 if __name__ == '__main__':
-    
-    
     args = get_args()
     data_folder = args.data_folder
     if os.path.exists('./'+data_folder.replace('Video','Video_npy')):
@@ -39,22 +37,21 @@ if __name__ == '__main__':
     else:
         pass_data = []
 
-    filenames = glob.glob(data_folder+'/*.mp4')
+    filenames = glob.glob(f'{data_folder}/*.mp4')
     filenames = sorted(filenames)
-    i=1
+    
     for filename in tqdm.tqdm(filenames):
-        if filename.split('/')[-1][:-4]+'.npy.npz' in pass_data:
+        if filename.split('\\')[-1][:-4]+'.npz' in pass_data:
             continue
-        
         data = extract_opencv(filename) 
         path_to_save = os.path.join(data_folder.replace('Video','Video_npy'),
-                                    filename.split('/')[-1][:-4]+'.npy')
+                                    filename.split('\\')[-1][:-4])
         if not os.path.exists(os.path.dirname(path_to_save)):
-            print("path_to_save doesn't exist@")
+            print(f"{path_to_save} doesn't exist@")
             try:
                 os.makedirs(os.path.dirname(path_to_save))
+                print(f"Make directory : {path_to_save}")
             except OSError as exc:
-                if exc.errno != errno.EEXIST:
-                    raise
-        np.savez_compressed(path_to_save, data)
-        i+=1
+                raise
+        # np.save(path_to_save, data) # Too Large to store
+        np.savez_compressed(path_to_save, video=data) # Compress file to 20%
