@@ -1,0 +1,67 @@
+train:
+    ### GPU / WORKERS / SEED #####
+    seed : 1
+    multi_gpu : False
+    gpu : '0'
+    num_workers : 4
+
+    ### DATASET ###
+    transcripts_path_train : 'dataset/Train.txt'
+    noise_path : 'data_folder/Noise'
+    vocab_label : 'dataset/labels.csv'
+
+    ### STATUS ###
+    checkpoint_every : 500  #train 중간마다 저장
+    print_every : 10        #iteration 출력 업데이트 주기
+    exp_day : 'final'
+
+    ### TRAIN ###
+    num_epochs : 100
+    batch_size : 8
+    learning_rate : 0.0001
+    
+audio:
+    feature_extract_by : 'librosa'
+    transform_method : fbank
+    sample_rate : 16000
+    n_mels : 80
+    frame_length : 20 
+    frame_shift : 10
+    normalize : True
+    spec_augment : True
+    spec_augment_method : 2 ## 1 - default, 2 - background noise
+    freq_mask_para : 12
+    time_mask_num : 2
+    freq_mask_num : 2
+
+
+model : 
+    ## My Model config ##
+    #input feature #from las
+    feature: logmelspectrogram
+    use_npy: False
+    split_balance : 0.1
+
+las_model : 
+    # Train
+    label_smoothing: 0.1
+    
+    # Encoder
+    encoder_hidden_dim : 256
+    encoder_bidirectional: True
+    encoder_rnn_type: LSTM
+    num_encoder_layers: 3
+    encoder_dropout_p: 0.1
+    mask_conv: False
+
+    # Decoder
+    decoder_max_length: 150
+    decoder_embedding_dim: 512
+    decoder_hidden_dim: 512
+    decoder_attn_mechanism: dot
+    decoder_num_heads: 4
+    decoder_num_layers: 2
+    decoder_rnn_type: LSTM
+    decoder_dropout_p: 0.3
+    decoder_bidirectional: False
+    decoder_use_beam: False

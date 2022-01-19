@@ -1,0 +1,61 @@
+train:
+    ### GPU / WORKERS / SEED #####
+    multi_gpu : False
+    gpu : '0'
+    num_workers : 4
+
+    ### DATASET ###
+    transcripts_path_test : 'dataset/Test.txt'
+    vocab_label : 'dataset/labels.csv'
+    batch_size : 5
+    
+
+model: 
+    ## My Model config ##
+    #input feature #from las
+    feature: logmelspectrogram
+    use_npy: False
+    split_balance : 0.1
+    model_path : './outputs/model_pt/'
+    model_file: 'checkpoint_epoch_140.pt'
+    exp_day: 'final'
+
+audio:
+    feature_extract_by : 'librosa'
+    transform_method : fbank
+    sample_rate : 16000
+    n_mels : 80
+    frame_length : 20 
+    frame_shift : 10
+    normalize : True
+    spec_augment : False
+    freq_mask_para : 12
+    time_mask_num : 2
+    freq_mask_num : 2
+
+las_model : 
+    # Train
+    label_smoothing: 0.1
+    learning_rate: 0.0005
+
+    # Encoder
+    encoder_hidden_dim : 256
+    encoder_bidirectional: True
+    encoder_rnn_type: LSTM
+    num_encoder_layers: 3
+    encoder_dropout_p: 0.1
+    mask_conv: False
+
+    # Decoder
+    decoder_max_length: 150
+    decoder_embedding_dim: 512
+    decoder_hidden_dim: 512
+    decoder_attn_mechanism: dot
+    decoder_num_heads: 4
+    decoder_num_layers: 2
+    decoder_rnn_type: LSTM
+    decoder_dropout_p: 0.3
+    decoder_bidirectional: False
+    decoder_use_beam: False
+
+    
