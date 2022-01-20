@@ -54,7 +54,6 @@ def generate_character_script(videos_paths, audios_paths, transcripts,test=False
     
         with open(os.path.join('./dataset/'+mode+".txt"), "w") as f:
             tmp = list(zip(videos_paths, audios_paths, transcripts))
-            random.shuffle(tmp)
             videos_paths,audios_paths, transcripts = zip(*tmp)
             for video_path, audio_path,transcript in zip(videos_paths,audios_paths, transcripts):
                 char_id_transcript = sentence_to_target(transcript, char2id)
