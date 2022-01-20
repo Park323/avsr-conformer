@@ -114,3 +114,5 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+dataset/Test.txt
+dataset/Train.txt
