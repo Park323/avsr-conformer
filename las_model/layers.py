@@ -140,28 +140,3 @@ class LocationAwareAttention(nn.Module):
 
         return context, alignmment_energy
 
-class LabelSmoothingLoss(nn.Module):
-    def __init__(self, vocab_size, ignore_index, smoothing=0.1, dim=-1):
-        super(LabelSmoothingLoss, self).__init__()
-        self.confidence = 1.0 - smoothing
-        self.smoothing = smoothing
-        self.vocab_size = vocab_size
-        self.dim = dim
-        self.ignore_index = ignore_index
-
-    def forward(self, logit, target):
-        with torch.no_grad():
-            label_smoothed = torch.zeros_like(logit).cuda()
-            label_smoothed.fill_(self.smoothing / (self.vocab_size - 1))
-            #print(label_smoothed, target.data.unsqueeze(1))
-            label_smoothed.scatter_(1, target.data.unsqueeze(1), self.confidence)
-            label_smoothed[target == self.ignore_index, :] = 0
-
-            # print(label_smoothed)
-            # print(label_smoothed.size())
-            # print(logit)
-            # print(logit.size())
-            # print(-label_smoothed * logit)
-            # print(torch.sum(-label_smoothed * logit))
-
-        return torch.sum(-label_smoothed * logit)

@@ -14,7 +14,6 @@ import numpy as np
 import pdb
 import csv
 import sys
-from astropy.modeling import ParameterError
 from numpy.lib.stride_tricks import as_strided
 import warnings
 #import librosa
@@ -44,7 +43,7 @@ def load_dataset(transcripts_path):
 
     return video_paths, audio_paths, korean_transcripts, transcripts
 
-def prepare_dataset(config, transcripts_path: str, vocab: Vocabulary, Train=True, bg_sound=None):
+def prepare_dataset(config, transcripts_path: str, vocab: Vocabulary, Train=True):
 
     train_or_test = 'train' if Train else 'test'
     print(f"prepare {train_or_test} dataset start !!")
@@ -60,8 +59,7 @@ def prepare_dataset(config, transcripts_path: str, vocab: Vocabulary, Train=True
                 sos_id=vocab.sos_id, 
                 eos_id=vocab.eos_id,
                 config=config,
-                bg_sound = bg_sound,                      # noise
-                spec_augment = config.audio.spec_augment, # masking
+                spec_augment = False #config.audio.spec_augment, # masking
                 )
     elif Train == False:
         trainset = AV_Dataset(
@@ -71,8 +69,7 @@ def prepare_dataset(config, transcripts_path: str, vocab: Vocabulary, Train=True
             transcripts=tr_transcripts,
             sos_id=vocab.sos_id, 
             eos_id=vocab.eos_id,
-            config=config, 
-            bg_sound = bg_sound,  # noise
+            config=config,
             spec_augment = False, # masking
             )
     
@@ -95,7 +92,6 @@ class AV_Dataset(Dataset):
             eos_id: int,                    # identification of end of sequence token
             config,             # set of arguments
             spec_augment: bool = False,     # flag indication whether to use spec-augmentation of not
-            bg_sound = None                  # Background noise object
             ):
         super(AV_Dataset, self).__init__()
         
@@ -105,7 +101,8 @@ class AV_Dataset(Dataset):
                                             config.audio.frame_length, 
                                             config.audio.frame_shift,
                                             )
-
+        elif config.audio.transform_method.lower() == 'raw':
+            self.transforms = lambda x: x
 
         self.video_paths = list(video_paths)
         self.audio_paths = list(audio_paths)
@@ -121,8 +118,6 @@ class AV_Dataset(Dataset):
         self.SPEC_AUGMENT = 1      # SpecAugment
         self.augment_methods = [self.VANILLA] * len(self.audio_paths)
         
-        self.noise_syn = bg_sound if bg_sound else False
-        
         self.spec_augment = SpecAugment(config.audio.freq_mask_para, 
                                     config.audio.time_mask_num, 
                                     config.audio.freq_mask_num,
@@ -130,19 +125,21 @@ class AV_Dataset(Dataset):
 
         self._augment(spec_augment)
 
-        # test data는 셔플하지 않음
-        if self.noise_syn:
-            self.shuffle()
-
-
+    def __getitem__(self, index):
+        video_feature = self.parse_video(self.video_paths[index])
+        # #return dummy video feature
+        # video_feature = torch.Tensor([[0]])
+        audio_feature = self.parse_audio(self.audio_paths[index],self.augment_methods)
+        transcript = self.parse_transcript(self.transcripts[index])
+        korean_transcript = self.parse_korean_transcripts(self.korean_transcripts[index])
+        return video_feature, audio_feature, transcript, korean_transcript,
+    
     def parse_audio(self,audio_path: str, augment_method):
         # pdb.set_trace()
         signal, _ = get_sample(audio_path,resample=16000)
-        if self.noise_syn:
-            signal = self.noise_syn(signal,is_path=False)
-            signal = signal.numpy().reshape(-1,)
-        else:
-            signal = signal.numpy().reshape(-1,)
+        # if self.noise_syn:
+        #     signal = self.noise_syn(signal,is_path=False)
+        # signal = signal.numpy().reshape(-1,)
 
         feature = self.transforms(signal)
         
@@ -158,33 +155,14 @@ class AV_Dataset(Dataset):
         return feature
     
     def parse_video(self, video_path: str):
-        try:
-            video = np.load(video_path, allow_pickle=True)
-        except:
-            print('error on', video_path)
-            assert False
-
-        #video = np.load(video_path)
-        video = video['arr_0']
+        # video = np.load(video_path, allow_pickle=True)['video']
+        video = np.load(video_path)['video']
         video = torch.from_numpy(video).float()
-        video = torch.cumsum(video,dim=0)
-
         video -= torch.mean(video)
         video /= torch.std(video)
         video_feature  = video
-        # video_feature = video_feature.permute(3,0,1,2) #T H W C --> C T H W
+        video_feature = video_feature.permute(3,0,1,2) #T H W C --> C T H W
         return video_feature
-
-
-    def __getitem__(self, index):
-        #do not use video data
-        #video_feature = self.parse_video(self.video_paths[index])
-        #return dummy video feature
-        video_feature = torch.Tensor([[0]])
-        audio_feature = self.parse_audio(self.audio_paths[index],self.augment_methods)
-        transcript = self.parse_transcript(self.transcripts[index])
-        korean_transcript = self.parse_korean_transcripts(self.korean_transcripts[index])
-        return video_feature, audio_feature, transcript, korean_transcript,
 
     def parse_transcript(self, transcript):
         tokens = transcript.split(' ')
@@ -238,8 +216,6 @@ class AV_Dataset(Dataset):
 
 
 def _collate_fn(batch):
-    #do not use video data
-    with_vid = False
     """ functions that pad to the maximum sequence length """
     def vid_length_(p):
         return len(p[0])
@@ -253,29 +229,26 @@ def _collate_fn(batch):
     # sort by sequence length for rnn.pack_padded_sequence()
     # pdb.set_trace()
     batch = sorted(batch, key=lambda sample: sample[0].size(0), reverse=True)
-    if with_vid:
-      vid_lengths = [len(s[0]) for s in batch]
-
+    
+    vid_lengths = [len(s[0]) for s in batch]
     seq_lengths = [len(s[1]) for s in batch]
     target_lengths = [len(s[2]) - 1 for s in batch]
-    if with_vid:
-       max_vid_sample = max(batch, key=vid_length_)[0]
+    
+    max_vid_sample = max(batch, key=vid_length_)[0]
     max_seq_sample = max(batch, key=seq_length_)[1]
     max_target_sample = max(batch, key=target_length_)[2]
-    if with_vid:
-        size = max_vid_sample.size(0)
+    
+    max_vid_size = max_vid_sample.size(0)
     max_seq_size = max_seq_sample.size(0)
     max_target_size = len(max_target_sample)
     
-    if with_vid:
-        vid_feat_x = max_vid_sample.size(1)
-        vid_feat_y = max_vid_sample.size(2)
-        vid_feat_c = max_vid_sample.size(3)
+    vid_feat_x = max_vid_sample.size(1)
+    vid_feat_y = max_vid_sample.size(2)
+    vid_feat_c = max_vid_sample.size(3)
     feat_size = max_seq_sample.size(1)
     batch_size = len(batch)
     
-    if with_vid:
-        vids = torch.zeros(batch_size, max_vid_size, vid_feat_x,vid_feat_y,vid_feat_c)
+    vids = torch.zeros(batch_size, max_vid_size, vid_feat_x,vid_feat_y,vid_feat_c)
     seqs = torch.zeros(batch_size, max_seq_size, feat_size)
 
     targets = torch.zeros(batch_size, max_target_size).to(torch.long)
@@ -283,27 +256,22 @@ def _collate_fn(batch):
     # pdb.set_trace()
     for x in range(batch_size):
         sample = batch[x]
-        if with_vid:
-            video_ = sample[0]
+        video_ = sample[0]
         tensor = sample[1]
         target = sample[2]
-        if with_vid:
-            vid_length = video_.size(0)
+        vid_length = video_.size(0)
         seq_length = tensor.size(0)
-        if with_vid:
-            vids[x,:vid_length,:,:,:] = video_
+        vids[x,:vid_length,:,:,:] = video_
         seqs[x].narrow(0, 0, seq_length).copy_(tensor)
         targets[x].narrow(0, 0, len(target)).copy_(torch.LongTensor(target))
-    if with_vid:
-        vid_lengths = torch.IntTensor(vid_lengths)
+    
+    vid_lengths = torch.IntTensor(vid_lengths)
     seq_lengths = torch.IntTensor(seq_lengths)
+    
     #B T W H C -->B C T W H
     # pdb.set_trace()
-    if with_vid:
-        vids = vids.permute(0,4,1,2,3)
-    else:
-        vids = None
-        vid_lengths = None
+    vids = vids.permute(0,4,1,2,3)
+    
     return vids, seqs, targets, vid_lengths, seq_lengths, target_lengths
 
 

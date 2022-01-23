@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 data/Test/Video_npy/00001.npz	data/Test/Audio/00001.wav	-	0
 data/Test/Video_npy/00002.npz	data/Test/Audio/00002.wav	-	0
 data/Test/Video_npy/00003.npz	data/Test/Audio/00003.wav	-	0
@@ -998,3 +999,8 @@ data/Test/Video_npy/00997.npz	data/Test/Audio/00997.wav	-	0
 data/Test/Video_npy/00998.npz	data/Test/Audio/00998.wav	-	0
 data/Test/Video_npy/00999.npz	data/Test/Audio/00999.wav	-	0
 data/Test/Video_npy/01000.npz	data/Test/Audio/01000.wav	-	0
+=======
+data/Sample/Video_npy\00001.npz	data/Sample/Audio\00001.wav	-	0
+data/Sample/Video_npy\00002.npz	data/Sample/Audio\00002.wav	-	0
+data/Sample/Video_npy\00003.npz	data/Sample/Audio\00003.wav	-	0
+>>>>>>> 037ab9c3417d9423499bd05b55f6268da50b2d6a
