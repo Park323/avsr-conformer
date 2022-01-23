@@ -133,10 +133,11 @@ def main(config):
 
     trainset = prepare_dataset(config, config.train.transcripts_path_train, vocab, Train=True)
     
-    print(f'trainset : {len(trainset)} batches')
     train_loader = torch.utils.data.DataLoader(dataset=trainset, batch_size=config.train.batch_size,
                                                shuffle=True, collate_fn = _collate_fn, 
                                                num_workers=config.train.num_workers)
+    
+    print(f'trainset : {len(trainset)}, {len(train_loader)} batches')
     
     train_begin_time = time.time()
     print('Train start')
