@@ -59,7 +59,6 @@ def prepare_dataset(config, transcripts_path: str, vocab: Vocabulary, Train=True
                 sos_id=vocab.sos_id, 
                 eos_id=vocab.eos_id,
                 config=config,
-                spec_augment = False #config.audio.spec_augment, # masking
                 )
     elif Train == False:
         trainset = AV_Dataset(
@@ -70,7 +69,6 @@ def prepare_dataset(config, transcripts_path: str, vocab: Vocabulary, Train=True
             sos_id=vocab.sos_id, 
             eos_id=vocab.eos_id,
             config=config,
-            spec_augment = False, # masking
             )
     
     print(f"prepare {train_or_test} dataset finished.")
@@ -139,7 +137,7 @@ class AV_Dataset(Dataset):
         signal, _ = get_sample(audio_path,resample=16000)
         # if self.noise_syn:
         #     signal = self.noise_syn(signal,is_path=False)
-        # signal = signal.numpy().reshape(-1,)
+        signal = signal.numpy().reshape(-1,)
 
         feature = self.transforms(signal)
         
