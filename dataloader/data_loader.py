@@ -93,6 +93,8 @@ class AV_Dataset(Dataset):
             ):
         super(AV_Dataset, self).__init__()
         
+        self.config = config
+        
         if config.audio.transform_method.lower() == 'fbank':
             self.transforms = FilterBank(config.audio.sample_rate, 
                                             config.audio.n_mels, 
@@ -100,8 +102,8 @@ class AV_Dataset(Dataset):
                                             config.audio.frame_shift,
                                             )
         elif config.audio.transform_method.lower() == 'raw':
-            self.transforms = lambda x: x
-
+            self.transforms = lambda x: np.expand_dims(x,1)
+            
         self.video_paths = list(video_paths)
         self.audio_paths = list(audio_paths)
         self.korean_transcripts = list(korean_transcripts)
@@ -134,7 +136,7 @@ class AV_Dataset(Dataset):
     
     def parse_audio(self,audio_path: str, augment_method):
         # pdb.set_trace()
-        signal, _ = get_sample(audio_path,resample=16000)
+        signal, _ = get_sample(audio_path,resample=self.config.audio.sample_rate)
         # if self.noise_syn:
         #     signal = self.noise_syn(signal,is_path=False)
         signal = signal.numpy().reshape(-1,)
@@ -145,7 +147,7 @@ class AV_Dataset(Dataset):
             feature -= feature.mean()
             feature /= np.std(feature)
 
-        feature = FloatTensor(feature).transpose(0, 1)
+        feature = FloatTensor(feature)
 
         if augment_method == self.SPEC_AUGMENT:
             feature = self.spec_augment(feature)
@@ -159,7 +161,6 @@ class AV_Dataset(Dataset):
         video -= torch.mean(video)
         video /= torch.std(video)
         video_feature  = video
-        video_feature = video_feature.permute(3,0,1,2) #T H W C --> C T H W
         return video_feature
 
     def parse_transcript(self, transcript):
@@ -248,9 +249,9 @@ def _collate_fn(batch):
     
     vids = torch.zeros(batch_size, max_vid_size, vid_feat_x,vid_feat_y,vid_feat_c)
     seqs = torch.zeros(batch_size, max_seq_size, feat_size)
-
     targets = torch.zeros(batch_size, max_target_size).to(torch.long)
     targets.fill_(0)
+    
     # pdb.set_trace()
     for x in range(batch_size):
         sample = batch[x]
@@ -266,9 +267,11 @@ def _collate_fn(batch):
     vid_lengths = torch.IntTensor(vid_lengths)
     seq_lengths = torch.IntTensor(seq_lengths)
     
-    #B T W H C -->B C T W H
+    # B T W H C --> B C T W H
     # pdb.set_trace()
     vids = vids.permute(0,4,1,2,3)
+    # B T C     --> B C T
+    seqs = seqs.permute(0,2,1)
     
     return vids, seqs, targets, vid_lengths, seq_lengths, target_lengths
 

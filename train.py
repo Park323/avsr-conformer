@@ -7,18 +7,19 @@ import argparse
 import pdb
 from tqdm import tqdm
 
+from GPUtil import showUtilization as gpu_usage
 from dataloader.data_loader import prepare_dataset, _collate_fn
 from dataloader.augment import BackgroundNoise
 from base_builder.model_builder import build_model
 from dataloader.vocabulary import KsponSpeechVocabulary
 from omegaconf import OmegaConf
 from tensorboardX import SummaryWriter
-from metric.metric import CharacterErrorRate
+from metric.metric import *
 from metric.loss import *
 from checkpoint.checkpoint import Checkpoint
 from torch.utils.data import DataLoader
 
-device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 def train(config, model, dataloader, optimizer, criterion, metric, vocab,
                     train_begin_time, epoch, summary, device='cuda'):
@@ -31,10 +32,17 @@ def train(config, model, dataloader, optimizer, criterion, metric, vocab,
     model.train()
     begin_time = epoch_begin_time = time.time() #모델 학습 시작 시간
 
+    print("Initial GPU Usage")  
+    gpu_usage()
+    
     progress_bar = tqdm(enumerate(dataloader),ncols=110)
     for i, (video_inputs,audio_inputs,targets,video_input_lengths,audio_input_lengths,target_lengths) in progress_bar:
-        
+        # print(f'{i}th iteration')
+        # gpu_usage()
         optimizer.zero_grad()
+
+        video_inputs = video_inputs.to(device)
+        video_input_lengths = video_input_lengths.to(device)
 
         audio_inputs = audio_inputs.to(device)
         audio_input_lengths = audio_input_lengths.to(device)
@@ -51,19 +59,26 @@ def train(config, model, dataloader, optimizer, criterion, metric, vocab,
             outputs = model(*model_args)
             
         loss_target = targets[:, 1:]
+        
         loss = criterion(outputs, loss_target)
             
-        y_hats = outputs.max(-1)[1]
-        cer = metric(targets[:, 1:], y_hats)
+        cer = metric(loss_target, outputs)
         cers.append(cer) # add cer on this epoch
         loss.backward()
         optimizer.step()
 
-        total_num += int(audio_input_lengths.sum())  
+        total_num += int(audio_input_lengths.sum().item())
         epoch_loss_total += loss.item()
 
         timestep += 1
+        
+        # print("GPU Usage after allcoating a bunch of Tensors")  
+        # gpu_usage()
+        del outputs
         torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+        # print("GPU Usage after emptying the cache")  
+        # gpu_usage()
         
         if timestep % config.train.print_every == 0:
             current_time = time.time()
@@ -78,6 +93,10 @@ def train(config, model, dataloader, optimizer, criterion, metric, vocab,
                 optimizer.state_dict()['param_groups'][0]['lr'])
             )
             begin_time = time.time()
+            
+            print()
+            gpu_usage()
+            
         summary.add_scalar('iter_training/loss',loss,epoch*len(dataloader)+i)
         summary.add_scalar('iter_training/cer',cer,epoch*len(dataloader)+i)
     
@@ -94,8 +113,11 @@ def main(config):
     torch.cuda.manual_seed(config.train.seed)
     torch.cuda.manual_seed_all(config.train.seed)
     
-    os.environ["CUDA_VISIBLE_DEVICES"]= config.train.gpu #
+    os.environ["CUDA_VISIBLE_DEVICES"]= config.train.gpu
+    # os.environ["PYTORCH_CUDA_ALLOC_CONF"]= 'max_split_size_mb : 128'
     print("cuda : ", torch.cuda.is_available())
+    print('Current cuda device:', torch.cuda.current_device())
+    print('Count of using GPUs:', torch.cuda.device_count())
     vocab = KsponSpeechVocabulary(config.train.vocab_label)
 
     if not config.train.resume: # 학습한 경우가 없으면,
@@ -121,11 +143,10 @@ def main(config):
         
     # print(model)
 
-    train_metric = CharacterErrorRate(vocab)
-
     optimizer = torch.optim.Adam(model.parameters(), lr=config.train.learning_rate)
     criterion = get_criterion(config, vocab)
-        
+    train_metric = get_metric(config, vocab)
+
     tensorboard_path = f'outputs/tensorboard/{config.model.name}/{config.train.exp_day}'
     if not os.path.exists(tensorboard_path):
         os.makedirs(tensorboard_path)

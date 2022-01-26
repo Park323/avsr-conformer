@@ -1,9 +1,9 @@
 train:
     ### GPU / WORKERS / SEED #####
     seed : 1023
-    multi_gpu : False
-    gpu : '0'
-    num_workers : 1
+    multi_gpu : True
+    gpu : 1,2,3
+    num_workers : 3
 
     ### DATASET ###
     transcripts_path_train : 'dataset/Train.txt'
@@ -17,14 +17,14 @@ train:
 
     ### TRAIN ###
     num_epochs : 100
-    batch_size : 2
+    batch_size : 4
     learning_rate : 0.0001
 
     
 audio:
-    feature_extract_by : 'librosa'
+    feature_extract_by : 'None'
     transform_method : raw
-    sample_rate : 16000
+    sample_rate : 14400
     n_mels : 80
     frame_length : 20 
     frame_shift : 10
@@ -34,7 +34,7 @@ audio:
     freq_mask_para : 12
     time_mask_num : 2
     freq_mask_num : 2
-    n_channels : 2
+    n_channels : 1
 
 
 
@@ -53,14 +53,16 @@ model :
     # Train
     label_smoothing: 0.1
     alpha : 0.5
-    embedding_dim : 1160
+
+    # Metric
+    use_att : True
     
 
 encoder:
     # Encoder
     d_model : 512
     n_head : 8
-    n_layers: 17
+    n_layers: 6
     dropout_p: 0.1
     encoder_bidirectional: True
     encoder_rnn_type: LSTM
@@ -73,9 +75,9 @@ decoder:
     n_head   : 8
     ff_dim   : 512
     dropout_p: 0.3
-    n_layers : 17
+    n_layers : 6
     max_len  : 150
-    
+    vocab_size : 1159
 
     decoder_attn_mechanism: dot
     decoder_rnn_type: LSTM

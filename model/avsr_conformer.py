@@ -13,37 +13,48 @@ Audio : 16000 Hz
 class AudioVisualConformer(nn.Module):
     def __init__(self, config):
         super().__init__()
+        self.vocab_size = config.decoder.vocab_size
         self.fusion = FusionModule(config)
         self.visual = VisualFeatureExtractor(config)
         self.audio  = AudioFeatureExtractor(config)
+        self.target_embedding = nn.Linear(self.vocab_size, config.decoder.d_model)
         self.decoder= TransformerDecoder(config)
-        self.ceLinear = nn.Linear(config.decoder.d_model, config.model.embedding_dim)
-        self.ctcLinear = nn.Linear(config.decoder.d_model, config.model.embedding_dim)
+        self.ceLinear = nn.Linear(config.decoder.d_model, self.vocab_size)
+        self.ctcLinear = nn.Linear(config.decoder.d_model, self.vocab_size)
         
     def forward(self, 
                 video_inputs, video_input_lengths,
                 audio_inputs, audio_input_lengths,
                 targets, target_lengths, 
                 *args, **kwargs):
+        audio_inputs = audio_inputs[:, :, :video_inputs.size(2)*480]
         visualFeatures = self.visual(video_inputs)
         audioFeatures  = self.audio(audio_inputs)
         features = torch.cat([visualFeatures, audioFeatures], dim=-1)
         outputs = self.fusion(features)
-        att_out = F.log_softmax(self.ceLinear(self.decoder(targets, outputs)), dim=-1)
+        targets = F.one_hot(targets, num_classes = self.vocab_size)
+        targets = self.target_embedding(targets.to(torch.float32))
+        att_out = F.log_softmax(self.ceLinear(
+            self.decoder(targets, outputs)
+            ), dim=-1)
         ctc_out = F.log_softmax(self.ctcLinear(outputs), dim=-1)
         return (att_out, ctc_out)
     
 class TransformerDecoder(nn.Module):
+    '''
+    Inputs : (B x S x E), (B x T x E)
+    '''
     def __init__(self, config):
         super().__init__()
         decoder = nn.TransformerDecoderLayer(config.decoder.d_model, config.decoder.n_head, 
                                              config.decoder.ff_dim, config.decoder.dropout_p, batch_first=True)
         self.decoder = nn.TransformerDecoder(decoder, config.decoder.n_layers)
     def forward(self, labels, inputs):
-        label_mask = torch.zeros((labels.shape[-1], labels.shape[-1]))
-        for i in range(labels.shape[-1]):
+        label_mask = torch.zeros((labels.shape[1], labels.shape[1])).to(inputs.device)
+        for i in range(labels.shape[1]):
             label_mask[i, i+1:]=1.
-        return self.decoder(labels, inputs, label_mask)
+        outputs = self.decoder(labels, inputs, label_mask)
+        return outputs
     
 class FusionModule(nn.Module):
     def __init__(self, config):
@@ -56,7 +67,11 @@ class FusionModule(nn.Module):
         )
         
     def forward(self, features):
-        return self.MLP(features)
+        batch_seq_size = features.shape[:2]
+        features = torch.flatten(features, end_dim=1)
+        outputs = self.MLP(features)
+        outputs = outputs.view(*batch_seq_size, -1)
+        return outputs
     
 class VisualFeatureExtractor(nn.Module):
     def __init__(self, config):
@@ -66,7 +81,7 @@ class VisualFeatureExtractor(nn.Module):
         
     def forward(self, inputs):
         outputs = self.front(inputs)
-        outputs = self.back(outputs)
+        outputs = self.back(outputs, inputs.size(0))
         return outputs
         
 class VisualFrontEnd(nn.Module):
@@ -77,8 +92,8 @@ class VisualFrontEnd(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.conv1 = nn.Sequential(
-            nn.Conv3d(config.video.n_channels, 64, kernel_size=(5,7,7), stride=(1,2,2), padding=(4,0,0)),
-            nn.BatchNorm1d(64),
+            nn.Conv3d(config.video.n_channels, 64, kernel_size=(5,7,7), stride=(1,2,2), padding=(2,0,0)),
+            nn.BatchNorm3d(64),
             nn.ReLU(),
             nn.MaxPool3d((1,3,3),(1,2,2))
         )
@@ -90,7 +105,7 @@ class VisualFrontEnd(nn.Module):
         
     def forward(self, inputs):
         outputs = self.conv1(inputs).permute(0,2,1,3,4)
-        outputs = outputs.view(-1, outputs.shape[-3], outputs.shape[-2], outputs.shape[-1])
+        outputs = outputs.flatten(end_dim=1)
         outputs = self.conv2(outputs)
         outputs = self.conv3(outputs)
         outputs = self.conv4(outputs)
@@ -109,8 +124,9 @@ class VisualBackEnd(nn.Module):
         self.conformer = ConformerEncoder(config.encoder.d_model, config.encoder.d_model, 
                                           config.encoder.n_layers, config.encoder.n_head, input_dropout_p=config.encoder.dropout_p)
         
-    def forward(self, inputs):
-        return self.conformer(inputs)
+    def forward(self, inputs, input_lengths):
+        outputs, _ = self.conformer(inputs, input_lengths)
+        return outputs
         
 class AudioFeatureExtractor(nn.Module):
     def __init__(self, config):
@@ -120,18 +136,19 @@ class AudioFeatureExtractor(nn.Module):
         
     def forward(self, inputs):
         outputs = self.front(inputs)
-        outputs = self.back(outputs)
+        outputs = outputs.permute(0,2,1)
+        outputs = self.back(outputs, inputs.size(0))
         return outputs
     
 class AudioFrontEnd(nn.Module):
     '''
-    input :  (BxLxC)
-    output : (BxL`xD) L`:= length of audio sequence with 30 Hz
+    input :  (BxCxL)
+    output : (BxDxL`) L`:= length of audio sequence with 30 Hz
     '''
     def __init__(self, config):
         super().__init__()
         self.conv1 = nn.Sequential(
-            nn.Conv1d(config.audio.n_channels, 64, kernel_size=80, stride=10), # 80 : 5ms
+            nn.Conv1d(config.audio.n_channels, 64, kernel_size=79, stride=3, padding=39), # 80 : 5ms
             nn.BatchNorm1d(64),
             nn.ReLU(),
         )
@@ -139,7 +156,7 @@ class AudioFrontEnd(nn.Module):
         self.conv3 = get_residual_layer(2, 64, 128, 3)
         self.conv4 = get_residual_layer(2, 128, 256, 3)
         self.conv5 = get_residual_layer(2, 256, config.encoder.d_model, 3)
-        self.avg_pool = nn.AvgPool1d(21, 6) # -> 30fps
+        self.avg_pool = nn.AvgPool1d(21, 20, padding=10) # -> 30fps
         
     def forward(self, inputs):
         outputs = self.conv1(inputs)
@@ -160,8 +177,9 @@ class AudioBackEnd(nn.Module):
         self.conformer = ConformerEncoder(config.encoder.d_model, config.encoder.d_model, 
                                           config.encoder.n_layers, config.encoder.n_head, input_dropout_p=config.encoder.dropout_p)
         
-    def forward(self, inputs):
-        return self.conformer(inputs)
+    def forward(self, inputs, input_lengths):
+        outputs, _ = self.conformer(inputs, input_lengths)
+        return outputs
         
    
    
@@ -182,7 +200,7 @@ class ResidualCell(nn.Module):
             self.shortcut = nn.Identity(stride=2)
             stride = 1
         else:
-            self.shortcut = nn.Conv1d(in_channels, out_channels, kernel_size=1, stride=1)
+            self.shortcut = nn.Conv1d(in_channels, out_channels, kernel_size=1, stride=2)
             stride = 2
         self.conv = nn.Sequential(
             nn.Conv1d(in_channels,out_channels,kernel_size, stride=stride, padding=(kernel_size-1)//2),
@@ -206,7 +224,7 @@ class ResidualCell2d(nn.Module):
             self.shortcut = nn.Identity(stride=2)
             stride = 1
         else:
-            self.shortcut = nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1)
+            self.shortcut = nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=2)
             stride = 2
         self.conv = nn.Sequential(
             nn.Conv2d(in_channels,out_channels,kernel_size, stride=stride, padding=(kernel_size-1)//2),

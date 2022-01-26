@@ -1,6 +1,18 @@
 import Levenshtein as Lev
 from metric.wer_utils import Code, EditDistance, Token
 
+def get_metric(config, vocab):
+    if config.model.name == 'las':
+        metric = lambda targets, outputs : cer(targets, outputs, vocab)
+    elif config.model.name == 'conf':
+        idx = 0 if config.model.use_att else 1
+        metric = lambda targets, outputs : cer(targets, outputs[idx], vocab)
+    return metric
+
+def cer(targets, outputs, vocab):
+    y_hats = outputs.max(-1)[1]
+    return CharacterErrorRate(vocab)(targets, y_hats)
+
 class ErrorRate(object):
     """
     Provides inteface of error rate calcuation.

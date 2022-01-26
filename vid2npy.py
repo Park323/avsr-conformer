@@ -41,11 +41,11 @@ if __name__ == '__main__':
     filenames = sorted(filenames)
     
     for filename in tqdm.tqdm(filenames):
-        if filename.split('\\')[-1][:-4]+'.npz' in pass_data:
+        if filename.split('/')[-1][:-4]+'.npz' in pass_data:
             continue
         data = extract_opencv(filename) 
         path_to_save = os.path.join(data_folder.replace('Video','Video_npy'),
-                                    filename.split('\\')[-1][:-4])
+                                    filename.split('/')[-1][:-4])
         if not os.path.exists(os.path.dirname(path_to_save)):
             print(f"{path_to_save} doesn't exist@")
             try:

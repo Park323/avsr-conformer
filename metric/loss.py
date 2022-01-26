@@ -7,6 +7,7 @@ def get_criterion(config, vocab):
         criterion = Attention_Loss(config, vocab)
     elif config.model.name == 'conf':
         criterion = CTC_Attention_Loss(config, vocab)
+    return criterion
 
 class CTC_Attention_Loss(nn.Module):
     '''
@@ -25,10 +26,12 @@ class CTC_Attention_Loss(nn.Module):
     def forward(self, outputs, targets):
         a = float(self.config.model.alpha)
         targets = targets
-        att_out = outputs[0].contiguous().view(-1,outputs[0].shape[-1]) 
+        att_out = outputs[0][:,:-1].contiguous().view(-1,outputs[0].shape[-1]) 
         ctc_out = outputs[1].contiguous().permute(1,0,2) # (B,L,E)->(L,B,E)
         att_loss = self.att(att_out, targets.contiguous().view(-1))
-        ctc_loss = self.ctc(ctc_out, targets)
+        ctc_loss = self.ctc(ctc_out, targets, # ctc_out.size(0), targets.size(1),
+                            (torch.ones(ctc_out.shape[1])*ctc_out.shape[0]).to(torch.int), 
+                            (torch.ones(targets.shape[0])*targets.shape[1]).to(torch.int))
         return a*att_loss + (1-a)*ctc_loss
     
 class Attention_Loss(nn.Module):
