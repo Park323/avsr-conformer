@@ -1,17 +1,37 @@
 import Levenshtein as Lev
 from metric.wer_utils import Code, EditDistance, Token
 
+# def get_metric(config, vocab):
+#     if config.model.name == 'las':
+#         metric = lambda targets, outputs : cer(targets, outputs, vocab)
+#     elif config.model.name in ['conf', 'conf_a']:
+#         idx = 0 if config.model.use_att else 1
+#         metric = lambda targets, outputs : cer(targets, outputs[idx], vocab)
+#     return metric
+
 def get_metric(config, vocab):
     if config.model.name == 'las':
-        metric = lambda targets, outputs : cer(targets, outputs, vocab)
-    elif config.model.name == 'conf':
-        idx = 0 if config.model.use_att else 1
-        metric = lambda targets, outputs : cer(targets, outputs[idx], vocab)
-    return metric
+        use_idx = -1
+    elif config.model.name in ['conf', 'conf_a']:
+        use_idx = 0 if config.model.use_att else 1
+    return Metric(vocab, use_idx=use_idx)
 
-def cer(targets, outputs, vocab):
-    y_hats = outputs.max(-1)[1]
-    return CharacterErrorRate(vocab)(targets, y_hats)
+class Metric:
+    def __init__(self, vocab, use_idx=-1):
+        super().__init__()
+        self.metric = CharacterErrorRate(vocab)
+        self.use_idx = use_idx
+        
+    def reset(self):
+        self.metric.reset()
+    
+    def __call__(self, targets, outputs):
+        if self.use_idx != -1:
+            outputs = outputs[self.use_idx]
+        # if self.use_idx == 0:
+        #     outputs = outputs
+        y_hats = outputs.max(-1)[1]
+        return self.metric(targets, y_hats)
 
 class ErrorRate(object):
     """

@@ -39,6 +39,31 @@ class AudioVisualConformer(nn.Module):
             ), dim=-1)
         ctc_out = F.log_softmax(self.ctcLinear(outputs), dim=-1)
         return (att_out, ctc_out)
+
+class AudioConformer(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.vocab_size = config.decoder.vocab_size
+        self.audio  = AudioFeatureExtractor(config)
+        self.target_embedding = nn.Linear(self.vocab_size, config.decoder.d_model)
+        self.decoder= TransformerDecoder(config)
+        self.ceLinear = nn.Linear(config.decoder.d_model, self.vocab_size)
+        self.ctcLinear = nn.Linear(config.decoder.d_model, self.vocab_size)
+        
+    def forward(self, 
+                video_inputs, video_input_lengths,
+                audio_inputs, audio_input_lengths,
+                targets, target_lengths, 
+                *args, **kwargs):
+        audio_inputs = audio_inputs
+        audioFeatures  = self.audio(audio_inputs)
+        targets = F.one_hot(targets, num_classes = self.vocab_size)
+        targets = self.target_embedding(targets.to(torch.float32))
+        att_out = F.log_softmax(self.ceLinear(
+            self.decoder(targets, audioFeatures)
+            ), dim=-1)
+        ctc_out = F.log_softmax(self.ctcLinear(audioFeatures), dim=-1)
+        return (att_out, ctc_out)
     
 class TransformerDecoder(nn.Module):
     '''

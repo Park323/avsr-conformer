@@ -214,7 +214,7 @@ class AV_Dataset(Dataset):
         return len(self.audio_paths)
 
 
-def _collate_fn(batch):
+def _collate_fn(batch, max_len=150):
     """ functions that pad to the maximum sequence length """
     def vid_length_(p):
         return len(p[0])
@@ -235,11 +235,12 @@ def _collate_fn(batch):
     
     max_vid_sample = max(batch, key=vid_length_)[0]
     max_seq_sample = max(batch, key=seq_length_)[1]
-    max_target_sample = max(batch, key=target_length_)[2]
+    # max_target_sample = max(batch, key=target_length_)[2]
     
     max_vid_size = max_vid_sample.size(0)
     max_seq_size = max_seq_sample.size(0)
-    max_target_size = len(max_target_sample)
+    # max_target_size = len(max_target_sample)
+    max_target_size = max_len
     
     vid_feat_x = max_vid_sample.size(1)
     vid_feat_y = max_vid_sample.size(2)

@@ -14,11 +14,11 @@ train:
     ### STATUS ###
     checkpoint_every : 500  #train 중간마다 저장
     print_every : 5        #iteration 출력 업데이트 주기
-    exp_day : 'av'
+    exp_day : 'audio'
 
     ### TRAIN ###
-    num_epochs : 100
-    batch_size : 1
+    num_epochs : 1
+    batch_size : 4
     learning_rate : 0.0001
 
     
@@ -37,21 +37,14 @@ audio:
     freq_mask_num : 2
     n_channels : 1
 
-
-
-video:
-    n_channels : 3
-
-
-
 model : 
     ## My Model config ##
-    name : conf
+    name : conf_a
     feature: logmelspectrogram
     use_npy: False
     split_balance : 0.1
     max_len  : 150
-    
+
     # Train
     label_smoothing: 0.1
     alpha : 0.5

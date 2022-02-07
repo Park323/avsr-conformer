@@ -35,6 +35,8 @@ def sentence_to_target(sentence, char2id):
 
     return target[:-1]
 
+
+
 def target_to_sentence(target, id2char):
     sentence = ""
     targets = target.split()
@@ -42,7 +44,6 @@ def target_to_sentence(target, id2char):
     for n in targets:
         sentence += id2char[int(n)]
     return sentence
-
 
 
 
@@ -65,7 +66,7 @@ def generate_character_script(videos_paths, audios_paths, transcripts,test=False
                 f.write(f'{a}\t{b}\t{c}\t{str(0)}\n')
 
 
-    
+
 def preprocess(dataset_path, test=False):
     print('preprocess started..')
     mode = 'Test' if test else 'Train'
@@ -100,6 +101,8 @@ def get_args():
     parser.add_argument('-t', '--test', action='store_true')
     args = parser.parse_args()
     return args
+
+
 
 if __name__ == '__main__':
     

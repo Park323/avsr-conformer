@@ -18,7 +18,7 @@ class Checkpoint(object):
         self.optimizer = optimizer
         self.epoch = epoch
         self.exp_day = config.train.exp_day
-        self.architecture = config.model.architecture
+        self.architecture = config.model.name
         self.config = config
         self.SAVE_PATH = 'outputs/model_pt/'+str(self.architecture)+'/'+str(self.exp_day)
         self.LOAD_PATH = 'outputs/model_pt/'+str(self.architecture)+'/'+str(self.exp_day)

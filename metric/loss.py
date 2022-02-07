@@ -5,7 +5,7 @@ def get_criterion(config, vocab):
     
     if config.model.name == 'las':
         criterion = Attention_Loss(config, vocab)
-    elif config.model.name == 'conf':
+    elif config.model.name in ['conf', 'conf_a']:
         criterion = CTC_Attention_Loss(config, vocab)
     return criterion
 
@@ -19,7 +19,7 @@ class CTC_Attention_Loss(nn.Module):
         super().__init__()
         self.config = config
         self.vocab = vocab
-        self.ctc   = nn.CTCLoss(blank=vocab.unk_id, reduction='sum', zero_infinity=True)
+        self.ctc   = nn.CTCLoss(blank=vocab.unk_id, reduction='mean', zero_infinity=True)
         self.att   = LabelSmoothingLoss(len(vocab), ignore_index=vocab.pad_id,
                                         smoothing=config.model.label_smoothing)
         
@@ -63,5 +63,5 @@ class LabelSmoothingLoss(nn.Module):
             label_smoothed.fill_(self.smoothing / (self.vocab_size - 1))
             label_smoothed.scatter_(1, target.data.unsqueeze(1), self.confidence)
             label_smoothed[target == self.ignore_index, :] = 0
-
-        return torch.sum(-label_smoothed * logit)
+        # return torch.sum(-label_smoothed * logit)
+        return torch.mean(torch.sum(-label_smoothed * logit, axis=-1))

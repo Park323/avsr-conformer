@@ -20,25 +20,31 @@ from checkpoint.checkpoint import Checkpoint
 from torch.utils.data import DataLoader
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
+os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
+# os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
+# os.environ["CUDA_VISIBLE_DEVICES"]= "1" #config.train.gpu
+    
+print("cuda : ", torch.cuda.is_available())
+print('Current cuda device:', torch.cuda.current_device())
+print('Count of using GPUs:', torch.cuda.device_count())
+    
 def train(config, model, dataloader, optimizer, criterion, metric, vocab,
-                    train_begin_time, epoch, summary, device='cuda'):
+                    train_begin_time, epoch, summary, device='cuda', train=True):
     log_format = "epoch: {:4d}/{:4d}, step: {:4d}/{:4d}, loss: {:.6f}, " \
                               "cer: {:.2f}, elapsed: {:.2f}s {:.2f}m {:.2f}h, lr: {:.6f}"
     cers = []
     epoch_loss_total = 0.
     total_num = 0
     timestep = 0
-    model.train()
     begin_time = epoch_begin_time = time.time() #모델 학습 시작 시간
 
     print("Initial GPU Usage")  
     gpu_usage()
     
+    model.train() if train else model.eval()
+    if not train: torch.no_grad()
     progress_bar = tqdm(enumerate(dataloader),ncols=110)
     for i, (video_inputs,audio_inputs,targets,video_input_lengths,audio_input_lengths,target_lengths) in progress_bar:
-        # print(f'{i}th iteration')
-        # gpu_usage()
         optimizer.zero_grad()
 
         video_inputs = video_inputs.to(device)
@@ -57,17 +63,18 @@ def train(config, model, dataloader, optimizer, criterion, metric, vocab,
         
         with torch.cuda.amp.autocast():
             outputs = model(*model_args)
-            
-        loss_target = targets[:, 1:]
         
+        loss_target = targets[:, 1:]
         loss = criterion(outputs, loss_target)
-            
         cer = metric(loss_target, outputs)
         cers.append(cer) # add cer on this epoch
-        loss.backward()
-        optimizer.step()
+        
+        if train : 
+            loss.backward()
+            optimizer.step()
 
-        total_num += int(audio_input_lengths.sum().item())
+        total_num += 1
+        # total_num += outputs.size(0) * outputs.size(1)
         epoch_loss_total += loss.item()
 
         timestep += 1
@@ -94,15 +101,15 @@ def train(config, model, dataloader, optimizer, criterion, metric, vocab,
             )
             begin_time = time.time()
             
-            print()
-            gpu_usage()
+            # print()
+            # gpu_usage()
             
         summary.add_scalar('iter_training/loss',loss,epoch*len(dataloader)+i)
         summary.add_scalar('iter_training/cer',cer,epoch*len(dataloader)+i)
     
     summary.add_scalar('learning_rate/lr',optimizer.state_dict()['param_groups'][0]['lr'],epoch)
-        
     train_loss, train_cer = epoch_loss_total / total_num, sum(cers) / len(cers)
+    if not train: torch.enable_grad()
     return train_loss, train_cer
 
 def main(config):
@@ -113,11 +120,6 @@ def main(config):
     torch.cuda.manual_seed(config.train.seed)
     torch.cuda.manual_seed_all(config.train.seed)
     
-    os.environ["CUDA_VISIBLE_DEVICES"]= config.train.gpu
-    # os.environ["PYTORCH_CUDA_ALLOC_CONF"]= 'max_split_size_mb : 128'
-    print("cuda : ", torch.cuda.is_available())
-    print('Current cuda device:', torch.cuda.current_device())
-    print('Count of using GPUs:', torch.cuda.device_count())
     vocab = KsponSpeechVocabulary(config.train.vocab_label)
 
     if not config.train.resume: # 학습한 경우가 없으면,
@@ -153,12 +155,18 @@ def main(config):
     summary = SummaryWriter(tensorboard_path)
 
     trainset = prepare_dataset(config, config.train.transcripts_path_train, vocab, Train=True)
+    validset = prepare_dataset(config, config.train.transcripts_path_valid, vocab, Train=False)
     
+    collate_fn = lambda batch: _collate_fn(batch, config.model.max_len)
     train_loader = torch.utils.data.DataLoader(dataset=trainset, batch_size=config.train.batch_size,
-                                               shuffle=True, collate_fn = _collate_fn, 
+                                               shuffle=True, collate_fn = collate_fn, 
+                                               num_workers=config.train.num_workers)
+    valid_loader = torch.utils.data.DataLoader(dataset=validset, batch_size=config.train.batch_size,
+                                               shuffle=False, collate_fn = collate_fn, 
                                                num_workers=config.train.num_workers)
     
     print(f'trainset : {len(trainset)}, {len(train_loader)} batches')
+    print(f'validset : {len(validset)}, {len(valid_loader)} batches')
     
     train_begin_time = time.time()
     print('Train start')
@@ -172,15 +180,29 @@ def main(config):
         summary.add_scalar('training/loss',train_loss,epoch)
         summary.add_scalar('training/cer',train_cer,epoch)
 
-        Checkpoint(model, optimizer, epoch+1, config=config).save()
-
         print(tr_sentences)
         train_metric.reset()
+        
+        ######################         Valid          ######################
+        valid_loss, valid_cer = train(config, model, valid_loader, optimizer, criterion, train_metric, vocab,
+                                      train_begin_time, epoch, summary, device, train=False)
+        
+        val_sentences = 'Epoch %d Validation Loss %0.4f CER %0.5f '% (epoch+1, valid_loss, valid_cer)
+        
+        summary.add_scalar('valid/loss',valid_loss,epoch)
+        summary.add_scalar('valid/cer',valid_cer,epoch)
+
+        print(val_sentences)
+        train_metric.reset()
+        
+        Checkpoint(model, optimizer, epoch+1, config=config).save()
         
 def get_args():
     parser = argparse.ArgumentParser(description='각종 옵션')
     parser.add_argument('-r','--resume',
                         action='store_true', help='RESUME - 이어서 학습하면 True')
+    parser.add_argument('-s','--sample',
+                        action='store_true', help='USE_ONLY_SAMPLE_FOR_DEBUGGING')
     parser.add_argument('-m','--model',
                         required=True, help='Select Model')
     args = parser.parse_args()
@@ -190,9 +212,12 @@ if __name__ == '__main__':
     
     args = get_args()
     
-    config = OmegaConf.load(f'config/{args.model}.yaml')
+    config = OmegaConf.load(f"config/{args.model}.yaml")
 
     config.train['resume'] = args.resume
+    if args.sample:
+        config.train.transcripts_path_train = 'dataset/Sample.txt'
+        config.train.transcripts_path_valid = 'dataset/Sample.txt'
 
     main(config)
 
