@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+import pdb
 
 from model.conformer.encoder import ConformerEncoder
 
@@ -65,6 +66,22 @@ class AudioConformer(nn.Module):
                 audio_inputs, audio_input_lengths,
                 targets, target_lengths, 
                 *args, **kwargs):
+        audio_inputs = audio_inputs
+        audioFeatures  = self.audio(audio_inputs)
+        targets = F.one_hot(targets, num_classes = self.vocab_size)
+        targets = self.target_embedding(targets.to(torch.float32))
+        att_out = F.log_softmax(self.ceLinear(
+            self.decoder(targets, audioFeatures)
+            ), dim=-1)
+        ctc_out = F.log_softmax(self.ctcLinear(audioFeatures), dim=-1)
+        pdb.set_trace()
+        return (att_out, ctc_out)
+        
+    def greedy_search(self, 
+                      video_inputs, video_input_lengths,
+                      audio_inputs, audio_input_lengths,
+                      targets, target_lengths, 
+                      *args, **kwargs):
         audio_inputs = audio_inputs
         audioFeatures  = self.audio(audio_inputs)
         targets = F.one_hot(targets, num_classes = self.vocab_size)

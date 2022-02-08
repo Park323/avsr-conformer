@@ -46,10 +46,9 @@ def train(config, model, dataloader, optimizer, criterion, metric, vocab,
     progress_bar = tqdm(enumerate(dataloader),ncols=110)
     for i, (video_inputs,audio_inputs,targets,video_input_lengths,audio_input_lengths,target_lengths) in progress_bar:
         optimizer.zero_grad()
-
+        
         video_inputs = video_inputs.to(device)
         video_input_lengths = video_input_lengths.to(device)
-
         audio_inputs = audio_inputs.to(device)
         audio_input_lengths = audio_input_lengths.to(device)
 
@@ -79,13 +78,8 @@ def train(config, model, dataloader, optimizer, criterion, metric, vocab,
 
         timestep += 1
         
-        # print("GPU Usage after allcoating a bunch of Tensors")  
-        # gpu_usage()
-        del outputs
-        torch.cuda.empty_cache()
-        torch.cuda.synchronize()
-        # print("GPU Usage after emptying the cache")  
-        # gpu_usage()
+        print("GPU Usage after allcoating a bunch of Tensors")  
+        gpu_usage()
         
         if timestep % config.train.print_every == 0:
             current_time = time.time()
@@ -167,7 +161,6 @@ def main(config):
     
     print(f'trainset : {len(trainset)}, {len(train_loader)} batches')
     print(f'validset : {len(validset)}, {len(valid_loader)} batches')
-    
     train_begin_time = time.time()
     print('Train start')
     for epoch in range(start_epoch, config.train.num_epochs):

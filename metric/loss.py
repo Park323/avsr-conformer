@@ -28,6 +28,8 @@ class CTC_Attention_Loss(nn.Module):
         targets = targets
         att_out = outputs[0][:,:-1].contiguous().view(-1,outputs[0].shape[-1]) 
         ctc_out = outputs[1].contiguous().permute(1,0,2) # (B,L,E)->(L,B,E)
+        print(ctc_out.size())
+        raise BaseException
         att_loss = self.att(att_out, targets.contiguous().view(-1))
         ctc_loss = self.ctc(ctc_out, targets, # ctc_out.size(0), targets.size(1),
                             (torch.ones(ctc_out.shape[1])*ctc_out.shape[0]).to(torch.int), 
