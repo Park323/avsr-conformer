@@ -27,11 +27,10 @@ class AudioVisualConformer(nn.Module):
                 audio_inputs, audio_input_lengths,
                 targets, target_lengths, 
                 *args, **kwargs):
-        audio_inputs = audio_inputs[:, :, :video_inputs.size(2)*480]
+        video_inputs, audio_inputs = self.match_seq(video_inputs, audio_inputs)
         visualFeatures = self.visual(video_inputs)
         audioFeatures  = self.audio(audio_inputs)
-        features = torch.cat([visualFeatures, audioFeatures], dim=-1)
-        outputs = self.fusion(features)
+        outputs = self.fusion(visualFeatures, audioFeatures)
         targets = F.one_hot(targets, num_classes = self.vocab_size)
         targets = self.target_embedding(targets.to(torch.float32))
         att_out = F.log_softmax(self.ceLinear(
@@ -39,6 +38,17 @@ class AudioVisualConformer(nn.Module):
             ), dim=-1)
         ctc_out = F.log_softmax(self.ctcLinear(outputs), dim=-1)
         return (att_out, ctc_out)
+        
+    def match_seq(self, video_inputs, audio_inputs):
+        aud_seq_len = video_inputs.size(2)*480
+        if aud_seq_len <= audio_inputs.size(2):
+            audio_outputs = audio_inputs[:, :, :aud_seq_len]
+        else:
+            audio_outputs = torch.cat([audio_inputs, 
+                                       torch.zeros([*audio_inputs.shape[:2], 
+                                                    aud_seq_len-audio_inputs.size(2)])], 
+                                       dim=2)
+        return video_inputs, audio_outputs
 
 class AudioConformer(nn.Module):
     def __init__(self, config):
@@ -72,13 +82,17 @@ class TransformerDecoder(nn.Module):
     def __init__(self, config):
         super().__init__()
         decoder = nn.TransformerDecoderLayer(config.decoder.d_model, config.decoder.n_head, 
-                                             config.decoder.ff_dim, config.decoder.dropout_p, batch_first=True)
+                                             config.decoder.ff_dim, config.decoder.dropout_p)
         self.decoder = nn.TransformerDecoder(decoder, config.decoder.n_layers)
     def forward(self, labels, inputs):
+        # Generate Label's Mask
         label_mask = torch.zeros((labels.shape[1], labels.shape[1])).to(inputs.device)
         for i in range(labels.shape[1]):
             label_mask[i, i+1:]=1.
+        labels = labels.permute(1,0,2)
+        inputs = inputs.permute(1,0,2)
         outputs = self.decoder(labels, inputs, label_mask)
+        outputs = outputs.permute(1,0,2)
         return outputs
     
 class FusionModule(nn.Module):
@@ -91,7 +105,8 @@ class FusionModule(nn.Module):
             nn.Linear(config.encoder.d_model*4, config.encoder.d_model)
         )
         
-    def forward(self, features):
+    def forward(self, visualFeatures, audioFeatures):
+        features = torch.cat([visualFeatures, audioFeatures], dim=-1)
         batch_seq_size = features.shape[:2]
         features = torch.flatten(features, end_dim=1)
         outputs = self.MLP(features)

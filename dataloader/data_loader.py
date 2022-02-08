@@ -155,8 +155,8 @@ class AV_Dataset(Dataset):
         return feature
     
     def parse_video(self, video_path: str):
-        # video = np.load(video_path, allow_pickle=True)['video']
-        video = np.load(video_path)['video']
+        # video = np.load(video_path)['video']
+        video = np.load(video_path)
         video = torch.from_numpy(video).float()
         video -= torch.mean(video)
         video /= torch.std(video)
