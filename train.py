@@ -78,8 +78,8 @@ def train(config, model, dataloader, optimizer, criterion, metric, vocab,
 
         timestep += 1
         
-        print("GPU Usage after allcoating a bunch of Tensors")  
-        gpu_usage()
+        # print("GPU Usage after allcoating a bunch of Tensors")  
+        # gpu_usage()
         
         if timestep % config.train.print_every == 0:
             current_time = time.time()
@@ -115,6 +115,8 @@ def main(config):
     torch.cuda.manual_seed_all(config.train.seed)
     
     vocab = KsponSpeechVocabulary(config.train.vocab_label)
+    config.decoder.sos_id = vocab.sos_id
+    config.decoder.eos_id = vocab.eos_id
 
     if not config.train.resume: # 학습한 경우가 없으면,
         model = build_model(config, vocab)
@@ -151,7 +153,9 @@ def main(config):
     trainset = prepare_dataset(config, config.train.transcripts_path_train, vocab, Train=True)
     validset = prepare_dataset(config, config.train.transcripts_path_valid, vocab, Train=False)
     
-    collate_fn = lambda batch: _collate_fn(batch, config.model.max_len)
+    # pdb.set_trace()
+    
+    collate_fn = lambda batch: _collate_fn(batch, config)
     train_loader = torch.utils.data.DataLoader(dataset=trainset, batch_size=config.train.batch_size,
                                                shuffle=True, collate_fn = collate_fn, 
                                                num_workers=config.train.num_workers)

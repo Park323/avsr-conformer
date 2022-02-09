@@ -14,6 +14,7 @@ Audio : 16000 Hz
 class AudioVisualConformer(nn.Module):
     def __init__(self, config):
         super().__init__()
+        self.config = config
         self.vocab_size = config.decoder.vocab_size
         self.fusion = FusionModule(config)
         self.visual = VisualFeatureExtractor(config)
@@ -29,8 +30,10 @@ class AudioVisualConformer(nn.Module):
                 targets, target_lengths, 
                 *args, **kwargs):
         video_inputs, audio_inputs = self.match_seq(video_inputs, audio_inputs)
-        visualFeatures = self.visual(video_inputs)
         audioFeatures  = self.audio(audio_inputs)
+        visualFeatures = self.visual(video_inputs,
+                                     video_input_lengths,
+                                     use_raw_vid=self.config.video.use_raw_vid)
         outputs = self.fusion(visualFeatures, audioFeatures)
         targets = F.one_hot(targets, num_classes = self.vocab_size)
         targets = self.target_embedding(targets.to(torch.float32))
@@ -41,19 +44,22 @@ class AudioVisualConformer(nn.Module):
         return (att_out, ctc_out)
         
     def match_seq(self, video_inputs, audio_inputs):
-        aud_seq_len = video_inputs.size(2)*480
+        vid_len = video_inputs.size(2) if self.config.video.use_raw_vid=='on' else video_inputs.size(1)
+        aud_seq_len = vid_len * 480
         if aud_seq_len <= audio_inputs.size(2):
             audio_outputs = audio_inputs[:, :, :aud_seq_len]
         else:
-            audio_outputs = torch.cat([audio_inputs, 
-                                       torch.zeros([*audio_inputs.shape[:2], 
-                                                    aud_seq_len-audio_inputs.size(2)])], 
-                                       dim=2)
+            pad = torch.zeros([*audio_inputs.shape[:2], aud_seq_len-audio_inputs.size(2)]).to(audio_inputs.device)
+            audio_outputs = torch.cat([audio_inputs, pad], dim=2)
+        # pdb.set_trace()
         return video_inputs, audio_outputs
 
 class AudioConformer(nn.Module):
     def __init__(self, config):
         super().__init__()
+        self.sos_id = int(config.decoder.sos_id)
+        self.eos_id = int(config.decoder.eos_id)
+        self.ctc_att_rate = float(config.decoder.ctc_att_rate)
         self.vocab_size = config.decoder.vocab_size
         self.audio  = AudioFeatureExtractor(config)
         self.target_embedding = nn.Linear(self.vocab_size, config.decoder.d_model)
@@ -74,23 +80,57 @@ class AudioConformer(nn.Module):
             self.decoder(targets, audioFeatures)
             ), dim=-1)
         ctc_out = F.log_softmax(self.ctcLinear(audioFeatures), dim=-1)
-        pdb.set_trace()
+        
         return (att_out, ctc_out)
         
-    def greedy_search(self, 
-                      video_inputs, video_input_lengths,
-                      audio_inputs, audio_input_lengths,
-                      targets, target_lengths, 
-                      *args, **kwargs):
+    def onePassBeamSearch(self, 
+                          video_inputs, video_input_lengths,
+                          audio_inputs, audio_input_lengths,
+                          *args, **kwargs):
         audio_inputs = audio_inputs
         audioFeatures  = self.audio(audio_inputs)
-        targets = F.one_hot(targets, num_classes = self.vocab_size)
-        targets = self.target_embedding(targets.to(torch.float32))
-        att_out = F.log_softmax(self.ceLinear(
-            self.decoder(targets, audioFeatures)
-            ), dim=-1)
-        ctc_out = F.log_softmax(self.ctcLinear(audioFeatures), dim=-1)
-        return (att_out, ctc_out)
+        
+        # omega_0
+        queue = [torch.tensor([self.sos_id])]
+        
+        output = None
+        
+        # get CTC prediction
+        ctcProb = F.log_softmax(self.ctcLinear(audioFeatures), dim=-1)
+        
+        for l in range(audio_inputs.size(1)):
+            n_queue = []
+            while queue:
+                g = queue.pop()
+                # get Attention prediction
+                attProb = self.decoder(F.one_hot(g, self.vocab_size), audioFeatures, train=False)
+                attProb = F.log_softmax(self.ceLinear(attProb),dim=-1)
+                
+                for c in range(self.vocab_size):
+                    # Loop Except sos token
+                    if c==self.sos_id:
+                        continue
+                    h = torch.cat([g,torch.tensor([c])])
+                    ##########################################
+                    ctc = CTC_prob()
+                    ##########################################
+                    att = attProb[-1,c]
+                    
+    
+def CTC_prob(inputs, labels, blank_id=None):
+    _labels = torch.ones((labels.size(0), labels.size(1)*2 + 1)) * blank_id
+    labels[:,1::2] = _labels
+    probs = torch.zeros(labels.size(0), inputs.size(1), labels.size(1))
+    probs[:,0,:2] = 1
+    for i in range(probs.size(1)):
+        for j in range((i+1)*2):
+            for k in range(i*2):
+                probs[:,i, j] += probs[:,i-1, k]
+            letter = labels[:, j]
+            probs[:, i, j] *= inputs[i, letter]
+    ctc_prob = probs[:, -1, -2:].sum(dim=-1)
+    return ctc_prob
+                               
     
 class TransformerDecoder(nn.Module):
     '''
@@ -101,14 +141,17 @@ class TransformerDecoder(nn.Module):
         decoder = nn.TransformerDecoderLayer(config.decoder.d_model, config.decoder.n_head, 
                                              config.decoder.ff_dim, config.decoder.dropout_p)
         self.decoder = nn.TransformerDecoder(decoder, config.decoder.n_layers)
-    def forward(self, labels, inputs):
-        # Generate Label's Mask
-        label_mask = torch.zeros((labels.shape[1], labels.shape[1])).to(inputs.device)
-        for i in range(labels.shape[1]):
-            label_mask[i, i+1:]=1.
+    def forward(self, labels, inputs, train=True):
         labels = labels.permute(1,0,2)
         inputs = inputs.permute(1,0,2)
-        outputs = self.decoder(labels, inputs, label_mask)
+        if train:
+            # Generate Label's Mask
+            label_mask = torch.zeros((labels.shape[0], labels.shape[0])).to(inputs.device)
+            for i in range(labels.shape[0]):
+                label_mask[i, i+1:]=1.
+            outputs = self.decoder(labels, inputs, label_mask)
+        else:
+            outputs = self.decoder(labels, inputs)
         outputs = outputs.permute(1,0,2)
         return outputs
     
@@ -136,9 +179,15 @@ class VisualFeatureExtractor(nn.Module):
         self.front = VisualFrontEnd(config)
         self.back  = VisualBackEnd(config)
         
-    def forward(self, inputs):
-        outputs = self.front(inputs)
+    def forward(self, inputs, input_lengths, use_raw_vid='on'):
+        # pdb.set_trace()
+        if use_raw_vid=='on':
+            outputs = self.front(inputs)
+        else:
+            outputs = inputs
+        # pdb.set_trace()
         outputs = self.back(outputs, inputs.size(0))
+        # pdb.set_trace()
         return outputs
         
 class VisualFrontEnd(nn.Module):
@@ -192,9 +241,13 @@ class AudioFeatureExtractor(nn.Module):
         self.back  = AudioBackEnd(config)
         
     def forward(self, inputs):
+        # pdb.set_trace()
         outputs = self.front(inputs)
+        # pdb.set_trace()
         outputs = outputs.permute(0,2,1)
+        # pdb.set_trace()
         outputs = self.back(outputs, inputs.size(0))
+        # pdb.set_trace()
         return outputs
     
 class AudioFrontEnd(nn.Module):

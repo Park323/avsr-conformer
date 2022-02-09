@@ -155,12 +155,17 @@ class AV_Dataset(Dataset):
         return feature
     
     def parse_video(self, video_path: str):
-        # video = np.load(video_path)['video']
-        video = np.load(video_path)
+        if self.config.video.use_npz:
+            video = np.load(video_path)['video']
+        else:
+            video = np.load(video_path)
         video = torch.from_numpy(video).float()
         video -= torch.mean(video)
         video /= torch.std(video)
-        video_feature  = video
+        if self.config.video.use_raw_vid=='on':
+            video_feature  = video
+        else:
+            video_feature  = video.permute(1,0)
         return video_feature
 
     def parse_transcript(self, transcript):
@@ -214,7 +219,9 @@ class AV_Dataset(Dataset):
         return len(self.audio_paths)
 
 
-def _collate_fn(batch, max_len=150):
+def _collate_fn(batch, config):
+    max_len = config.model.max_len
+    raw    = config.video.use_raw_vid == 'on'
     """ functions that pad to the maximum sequence length """
     def vid_length_(p):
         return len(p[0])
@@ -226,8 +233,8 @@ def _collate_fn(batch, max_len=150):
         return len(p[2])
     
     # sort by sequence length for rnn.pack_padded_sequence()
-    # pdb.set_trace()
     batch = sorted(batch, key=lambda sample: sample[0].size(0), reverse=True)
+    batch_size = len(batch)
     
     vid_lengths = [len(s[0]) for s in batch]
     seq_lengths = [len(s[1]) for s in batch]
@@ -242,13 +249,16 @@ def _collate_fn(batch, max_len=150):
     # max_target_size = len(max_target_sample)
     max_target_size = max_len
     
-    vid_feat_x = max_vid_sample.size(1)
-    vid_feat_y = max_vid_sample.size(2)
-    vid_feat_c = max_vid_sample.size(3)
+    if raw:
+        vid_feat_x = max_vid_sample.size(1)
+        vid_feat_y = max_vid_sample.size(2)
+        vid_feat_c = max_vid_sample.size(3)
+        vids = torch.zeros(batch_size, max_vid_size, vid_feat_x,vid_feat_y,vid_feat_c)
+    else:
+        vid_feat_c = max_vid_sample.size(1)
+        vids = torch.zeros(batch_size, max_vid_size, vid_feat_c)
+        
     feat_size = max_seq_sample.size(1)
-    batch_size = len(batch)
-    
-    vids = torch.zeros(batch_size, max_vid_size, vid_feat_x,vid_feat_y,vid_feat_c)
     seqs = torch.zeros(batch_size, max_seq_size, feat_size)
     targets = torch.zeros(batch_size, max_target_size).to(torch.long)
     targets.fill_(0)
@@ -261,16 +271,23 @@ def _collate_fn(batch, max_len=150):
         target = sample[2]
         vid_length = video_.size(0)
         seq_length = tensor.size(0)
-        vids[x,:vid_length,:,:,:] = video_
+        if raw:
+            vids[x,:vid_length,:,:,:] = video_
+        else:
+            vids[x,:vid_length,:] = video_
         seqs[x].narrow(0, 0, seq_length).copy_(tensor)
         targets[x].narrow(0, 0, len(target)).copy_(torch.LongTensor(target))
     
     vid_lengths = torch.IntTensor(vid_lengths)
     seq_lengths = torch.IntTensor(seq_lengths)
     
-    # B T W H C --> B C T W H
-    # pdb.set_trace()
-    vids = vids.permute(0,4,1,2,3)
+    if raw:
+        # B T W H C --> B C T W H
+        # pdb.set_trace()
+        vids = vids.permute(0,4,1,2,3)
+    else:
+        # B T D
+        pass
     # B T C     --> B C T
     seqs = seqs.permute(0,2,1)
     

@@ -67,12 +67,15 @@ def generate_character_script(videos_paths, audios_paths, transcripts,test=False
 
 
 
-def preprocess(dataset_path, test=False):
+def preprocess(args, test=False):
+    data_folder = args.data_folder
+    video_path  = args.video_folder if args.video_folder else 'Video_npy'
+    
     print('preprocess started..')
     mode = 'Test' if test else 'Train'
     transcripts=[]
     
-    dataset_path_video = data_folder + '/Video_npy/*'
+    dataset_path_video = data_folder + f'/{video_path}/*'
     videos_paths = glob.glob(dataset_path_video)
     videos_paths = sorted(videos_paths)
 
@@ -98,6 +101,7 @@ def preprocess(dataset_path, test=False):
 def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('-d', '--data_folder', type=str, required=True)
+    parser.add_argument('-v', '--video_folder', type=str)
     parser.add_argument('-t', '--test', action='store_true')
     args = parser.parse_args()
     return args
@@ -107,7 +111,6 @@ def get_args():
 if __name__ == '__main__':
     
     args = get_args()
-    data_folder = args.data_folder
     test = args.test
-    videos_paths, audios_paths, transcripts = preprocess(data_folder, test=test)
+    videos_paths, audios_paths, transcripts = preprocess(args, test=test)
     generate_character_script(videos_paths,audios_paths, transcripts, test=test)
