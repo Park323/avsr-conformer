@@ -126,9 +126,11 @@ class AV_Dataset(Dataset):
         self._augment(spec_augment)
 
     def __getitem__(self, index):
-        video_feature = self.parse_video(self.video_paths[index])
-        # #return dummy video feature
-        # video_feature = torch.Tensor([[0]])
+        if self.config.video == 'off':
+            # return dummy video feature
+            video_feature = torch.Tensor([[0]])
+        else:
+            video_feature = self.parse_video(self.video_paths[index])
         audio_feature = self.parse_audio(self.audio_paths[index],self.augment_methods)
         transcript = self.parse_transcript(self.transcripts[index])
         korean_transcript = self.parse_korean_transcripts(self.korean_transcripts[index])
@@ -220,8 +222,7 @@ class AV_Dataset(Dataset):
 
 
 def _collate_fn(batch, config):
-    max_len = config.model.max_len
-    raw    = config.video.use_raw_vid == 'on'
+    
     """ functions that pad to the maximum sequence length """
     def vid_length_(p):
         return len(p[0])
@@ -232,32 +233,22 @@ def _collate_fn(batch, config):
     def target_length_(p):
         return len(p[2])
     
+    max_len = config.model.max_len
+    
     # sort by sequence length for rnn.pack_padded_sequence()
     batch = sorted(batch, key=lambda sample: sample[0].size(0), reverse=True)
     batch_size = len(batch)
     
-    vid_lengths = [len(s[0]) for s in batch]
     seq_lengths = [len(s[1]) for s in batch]
     target_lengths = [len(s[2]) - 1 for s in batch]
     
-    max_vid_sample = max(batch, key=vid_length_)[0]
     max_seq_sample = max(batch, key=seq_length_)[1]
     # max_target_sample = max(batch, key=target_length_)[2]
     
-    max_vid_size = max_vid_sample.size(0)
     max_seq_size = max_seq_sample.size(0)
     # max_target_size = len(max_target_sample)
     max_target_size = max_len
     
-    if raw:
-        vid_feat_x = max_vid_sample.size(1)
-        vid_feat_y = max_vid_sample.size(2)
-        vid_feat_c = max_vid_sample.size(3)
-        vids = torch.zeros(batch_size, max_vid_size, vid_feat_x,vid_feat_y,vid_feat_c)
-    else:
-        vid_feat_c = max_vid_sample.size(1)
-        vids = torch.zeros(batch_size, max_vid_size, vid_feat_c)
-        
     feat_size = max_seq_sample.size(1)
     seqs = torch.zeros(batch_size, max_seq_size, feat_size)
     targets = torch.zeros(batch_size, max_target_size).to(torch.long)
@@ -266,30 +257,52 @@ def _collate_fn(batch, config):
     # pdb.set_trace()
     for x in range(batch_size):
         sample = batch[x]
-        video_ = sample[0]
         tensor = sample[1]
         target = sample[2]
-        vid_length = video_.size(0)
         seq_length = tensor.size(0)
-        if raw:
-            vids[x,:vid_length,:,:,:] = video_
-        else:
-            vids[x,:vid_length,:] = video_
         seqs[x].narrow(0, 0, seq_length).copy_(tensor)
         targets[x].narrow(0, 0, len(target)).copy_(torch.LongTensor(target))
     
-    vid_lengths = torch.IntTensor(vid_lengths)
     seq_lengths = torch.IntTensor(seq_lengths)
     
-    if raw:
-        # B T W H C --> B C T W H
-        # pdb.set_trace()
-        vids = vids.permute(0,4,1,2,3)
-    else:
-        # B T D
-        pass
     # B T C     --> B C T
     seqs = seqs.permute(0,2,1)
+        
+    use_vid = config.video!='off'
+    
+    if use_vid :
+        raw = config.video.use_raw_vid == 'on'
+        vid_lengths = [len(s[0]) for s in batch]
+        max_vid_sample = max(batch, key=vid_length_)[0]
+        max_vid_size = max_vid_sample.size(0)
+        
+        if raw:
+            vid_feat_x = max_vid_sample.size(1)
+            vid_feat_y = max_vid_sample.size(2)
+            vid_feat_c = max_vid_sample.size(3)
+            vids = torch.zeros(batch_size, max_vid_size, vid_feat_x,vid_feat_y,vid_feat_c)
+        else:
+            vid_feat_c = max_vid_sample.size(1)
+            vids = torch.zeros(batch_size, max_vid_size, vid_feat_c)
+        
+        for x in range(batch_size):
+            video_ = sample[0]
+            vid_length = video_.size(0)
+            if raw:
+                vids[x,:vid_length,:,:,:] = video_
+            else:
+                vids[x,:vid_length,:] = video_
+    
+        vid_lengths = torch.IntTensor(vid_lengths)
+        
+        if raw:
+            # B T W H C --> B C T W H
+            # pdb.set_trace()
+            vids = vids.permute(0,4,1,2,3)
+
+    else:
+        vids = torch.tensor([[0]])
+        vid_lengths = torch.tensor([0]*batch_size)
     
     return vids, seqs, targets, vid_lengths, seq_lengths, target_lengths
 
