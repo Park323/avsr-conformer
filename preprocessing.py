@@ -47,18 +47,26 @@ def target_to_sentence(target, id2char):
 
 
 
-def generate_character_script(videos_paths, audios_paths, transcripts,test=False):
+def generate_character_script(videos_paths, audios_paths, transcripts, test=False, valid_rate=0.1):
     print('create_script started..')
     mode = 'Test' if test else 'Train'
     if mode == 'Train':
         char2id, id2char = load_label("./dataset/labels.csv")
+        
+        tmp = list(zip(videos_paths, audios_paths, transcripts))
+        
+        ### Train/Valid Split ###
+        random.shuffle(tmp)
+        val_num = int(valid_rate*len(tmp))
+        trainsets = tmp[:-val_num]
+        valsets = tmp[-val_num:]
     
-        with open(os.path.join('./dataset/'+mode+".txt"), "w") as f:
-            tmp = list(zip(videos_paths, audios_paths, transcripts))
-            videos_paths,audios_paths, transcripts = zip(*tmp)
-            for video_path, audio_path,transcript in zip(videos_paths,audios_paths, transcripts):
-                char_id_transcript = sentence_to_target(transcript, char2id)
-                f.write(f'{video_path}\t{audio_path}\t{transcript}\t{char_id_transcript}\n')
+        for mode, tmp in zip(['Train', 'Valid'],[trainsets, valsets]):
+            with open(os.path.join('./dataset/'+mode+".txt"), "w") as f:
+                videos_paths,audios_paths, transcripts = zip(*tmp)
+                for video_path, audio_path,transcript in zip(videos_paths,audios_paths, transcripts):
+                    char_id_transcript = sentence_to_target(transcript, char2id)
+                    f.write(f'{video_path}\t{audio_path}\t{transcript}\t{char_id_transcript}\n')
     else:
         with open(os.path.join('./dataset/'+mode+'.txt'),'w') as f:
             tmp = list(zip(videos_paths,audios_paths,transcripts))
