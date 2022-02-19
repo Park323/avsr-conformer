@@ -1,13 +1,19 @@
 import os,random,warnings,time,math
 import pickle
-import numpy as np
-import torch
-import torch.nn as nn
 import argparse
 import pdb
 from tqdm import tqdm
-
 from GPUtil import showUtilization as gpu_usage
+
+import numpy as np
+import torch
+import torch.nn as nn
+# import torch.distributed.autograd as dist_autograd
+# from torch.nn.parallel import DistributedDataParallel as nn.DataParallel
+# from torch.distributed.optim import DistributedOptimizer
+# from torch.distributed.rpc import RRef
+from torch.utils.data import DataLoader
+
 from dataloader.data_loader import prepare_dataset, _collate_fn
 from dataloader.augment import BackgroundNoise
 from base_builder.model_builder import build_model
@@ -17,7 +23,6 @@ from tensorboardX import SummaryWriter
 from metric.metric import *
 from metric.loss import *
 from checkpoint.checkpoint import Checkpoint
-from torch.utils.data import DataLoader
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
@@ -34,6 +39,7 @@ def train(config, model, dataloader, optimizer, criterion, metric, vocab,
                               "cer: {:.2f}, elapsed: {:.2f}s {:.2f}m {:.2f}h, lr: {:.6f}"
     cers = []
     epoch_loss_total = 0.
+    max_grad_norm = 1.
     total_num = 0
     timestep = 0
     begin_time = epoch_begin_time = time.time() #모델 학습 시작 시간
@@ -61,25 +67,43 @@ def train(config, model, dataloader, optimizer, criterion, metric, vocab,
                       targets, target_lengths]
         
         with torch.cuda.amp.autocast():
-            outputs = model(*model_args)
+            if train:
+                outputs = model(*model_args)
+            else:
+                outputs = model.module.predict(*model_args)
         
+        # get length of outputs
+        _outputs = outputs[1] if isinstance(outputs, tuple) else outputs
+        output_lengths = torch.zeros(_outputs.size(0)).to(_outputs.device).to(int)
+        for idx, output in enumerate(_outputs):
+            for k in range(output.size(0)):
+                if torch.argmax(output[k]) == vocab.eos_id:
+                    break
+            output_lengths[idx] = k # except eos
+        
+        # drop final_token from outputs & drop sos_token from targets
+        if isinstance(outputs, tuple):
+            loss_outputs = (outputs[0][:,:-1,:], outputs[1])
+        else:
+            loss_outputs = outputs[:,:-1,:]
         loss_target = targets[:, 1:]
-        loss = criterion(outputs, loss_target)
-        cer = metric(loss_target, outputs)
+        
+        loss = criterion(loss_outputs, output_lengths, loss_target, target_lengths) if train else torch.tensor(0)
+        pdb.set_trace()
+        cer = 0.0 if train else metric(loss_outputs, output_lengths, loss_target, target_lengths)
         cers.append(cer) # add cer on this epoch
         
-        if train : 
+        if not torch.isfinite(loss):
+            pdb.set_trace()
+        if train :
             loss.backward()
+            # nn.utils.clip_grad_norm_(model.module.parameters(), max_grad_norm)
             optimizer.step()
 
         total_num += 1
-        # total_num += outputs.size(0) * outputs.size(1)
         epoch_loss_total += loss.item()
 
         timestep += 1
-        
-        # print("GPU Usage after allcoating a bunch of Tensors")  
-        # gpu_usage()
         
         if timestep % config.train.print_every == 0:
             current_time = time.time()
@@ -94,9 +118,6 @@ def train(config, model, dataloader, optimizer, criterion, metric, vocab,
                 optimizer.state_dict()['param_groups'][0]['lr'])
             )
             begin_time = time.time()
-            
-            # print()
-            # gpu_usage()
             
         summary.add_scalar('iter_training/loss',loss,epoch*len(dataloader)+i)
         summary.add_scalar('iter_training/cer',cer,epoch*len(dataloader)+i)
@@ -115,8 +136,6 @@ def main(config):
     torch.cuda.manual_seed_all(config.train.seed)
     
     vocab = KsponSpeechVocabulary(config.train.vocab_label)
-    config.decoder.sos_id = vocab.sos_id
-    config.decoder.eos_id = vocab.eos_id
 
     if not config.train.resume: # 학습한 경우가 없으면,
         model = build_model(config, vocab)
@@ -157,7 +176,7 @@ def main(config):
     
     collate_fn = lambda batch: _collate_fn(batch, config)
     train_loader = torch.utils.data.DataLoader(dataset=trainset, batch_size=config.train.batch_size,
-                                               shuffle=True, collate_fn = collate_fn, 
+                                               shuffle=False, collate_fn = collate_fn, 
                                                num_workers=config.train.num_workers)
     valid_loader = torch.utils.data.DataLoader(dataset=validset, batch_size=config.train.batch_size,
                                                shuffle=False, collate_fn = collate_fn, 

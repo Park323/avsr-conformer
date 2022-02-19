@@ -4,6 +4,8 @@ import torch.nn.functional as F
 import numpy as np
 import pdb
 
+from time import time
+
 from model.conformer.encoder import ConformerEncoder
 
 '''
@@ -11,37 +13,216 @@ Video : 30 fps
 Audio : 16000 Hz
 '''
 
-class AudioVisualConformer(nn.Module):
-    def __init__(self, config):
+EPSILON = 1e-100
+
+class BaseConformer(nn.Module):
+    def __init__(self, config, vocab):
         super().__init__()
         self.config = config
+        self.sos_id = vocab.sos_id
+        self.eos_id = vocab.eos_id
+        self.unk_id = vocab.unk_id
+        self.pad_id = vocab.pad_id
+        self.ctc_att_rate = config.decoder.ctc_att_rate
+        self.beam_width = config.decoder.beam_width
         self.vocab_size = config.decoder.vocab_size
-        self.fusion = FusionModule(config)
-        self.visual = VisualFeatureExtractor(config)
-        self.audio  = AudioFeatureExtractor(config)
         self.target_embedding = nn.Linear(self.vocab_size, config.decoder.d_model)
         self.decoder= TransformerDecoder(config)
         self.ceLinear = nn.Linear(config.decoder.d_model, self.vocab_size)
         self.ctcLinear = nn.Linear(config.decoder.d_model, self.vocab_size)
+        self.debug_count = 0
         
     def forward(self, 
                 video_inputs, video_input_lengths,
                 audio_inputs, audio_input_lengths,
-                targets, target_lengths, 
+                targets, target_lengths,
                 *args, **kwargs):
+        features = self.encode(video_inputs, video_input_lengths,
+                               audio_inputs, audio_input_lengths)
+        outputs = self.decode(features, targets)
+        self.debug_count += 1
+        return outputs
+        
+    def encode(self, 
+               video_inputs, video_input_lengths,
+               audio_inputs, audio_input_lengths,
+               *args, **kwargs):
+        pass
+        
+    def decode(self, 
+               features,
+               targets,
+               *args, **kwargs):
+        targets = F.one_hot(targets, num_classes = self.vocab_size)
+        targets = self.target_embedding(targets.to(torch.float32))
+        att_out = F.log_softmax(self.ceLinear(
+            self.decoder(targets, features)
+            ), dim=-1)
+        ctc_out = F.log_softmax(self.ctcLinear(features), dim=-1)
+        return (att_out, ctc_out)
+        
+    def predict(self, 
+                video_inputs=None, 
+                video_input_lengths=None,
+                audio_inputs=None, 
+                audio_input_lengths=None,
+                *args, **kwargs):
+        predictions = []
+        features = self.encode(video_inputs, video_input_lengths, 
+                               audio_inputs, audio_input_lengths)
+        for i in range(audio_inputs.size(0)):
+            # _t = time()
+            predictions.append(self.onePassBeamSearch(features[i:i+1]))
+            # print(f"Predict per input took {time()-_t:.4f}sec...")    
+        return torch.cat(predictions, dim=0)
+        
+    def onePassBeamSearch(self, 
+                      features,
+                      *args, **kwargs):
+        # omega_0
+        queue = [torch.tensor([self.sos_id])]
+        scores = [0]
+        beam_width = self.beam_width
+        
+        complete = []
+        complete_scores= []
+        
+        # get CTC prediction
+        ctcProb = F.softmax(self.ctcLinear(features), dim=-1)
+        
+        Y_n = {t:{(self.sos_id,) : torch.tensor(0)} 
+                  for t in range(features.size(1))}
+        Y_b = {t:{(self.sos_id,) : self.pi_sos(t, ctcProb[0])}
+                  for t in range(features.size(1))}
+        
+        for l in range(1, min(features.size(1), self.config.model.max_len)):
+            n_queue = []
+            n_scores = []
+            
+            while queue:
+                # _t = time()
+                g = queue.pop()
+        
+                # get Attention prediction
+                labels = F.one_hot(g, self.vocab_size).unsqueeze(0).to(features.device)
+                labels = self.target_embedding(labels.to(torch.float32))
+                attProb = self.decoder(labels, features, train=False)
+                attScore = F.log_softmax(self.ceLinear(attProb),dim=-1)
+                # print(f'Attention decoding took {time()-_t:.4f}sec...')
+                
+                candidate_idxs = attScore.topk(k=3, dim=-1).indices[0,-1,:].tolist()
+                candidate_idxs = [self.eos_id, *candidate_idxs]
+                # _t = time()
+                for c in candidate_idxs:
+                    # Loop Except sos token
+                    if c==self.sos_id:
+                        continue
+                    elif c==self.unk_id:
+                        continue
+                        
+                    h = torch.cat([g,torch.tensor([c])])
+                    
+                    ctc = self.get_ctc_score(tuple(h.tolist()), ctcProb.squeeze(0), 
+                                             Y_n, Y_b)
+                    att = attScore[0,-1,c]
+                    score = self.ctc_att_rate * ctc + (1-self.ctc_att_rate) * att
+                    score = score.cpu().item()
+                    
+                    if c==self.eos_id:
+                        complete_scores.append(score)
+                        complete.append(h)
+                    else:
+                        n_scores.append(score)
+                        n_queue.append(h)
+                        if len(n_queue) > beam_width:
+                            min_idx = np.argmin(n_scores)
+                            n_scores.pop(min_idx)
+                            n_queue.pop(min_idx)
+                # print(f"CTC decoding took {time()-_t:.4f}sec...")
+                
+            if self.EndDetect(l+1, complete, complete_scores):
+                break
+
+            queue = n_queue
+            scores = n_scores
+        
+        # free    
+        del Y_n
+        del Y_b
+        
+        best_guess = complete[np.argmax(complete_scores)]
+        pad        = torch.ones(150-best_guess.size(0)).to(best_guess.device) * self.pad_id
+        best_guess = torch.cat([best_guess, pad.int()], dim=0)
+        best_guess = F.one_hot(best_guess, self.vocab_size)
+        best_guess = best_guess.unsqueeze(0)
+        
+        # pdb.set_trace()
+        return best_guess
+
+    def pi_sos(self, t, prob):
+        y = 1
+        for i in range(t):
+            y *= prob[i, self.unk_id]
+        return y 
+            
+    def EndDetect(self, l, complete_list, complete_score, D=-1.5, M=3):
+        if complete_score:
+            global_max = np.max(complete_score)
+            for m in range(min(M, l)):
+                idxs = []
+                seq_list = []
+                score_list = []
+                for i, a in enumerate(complete_list):
+                    if len(a) == l - m:
+                        idxs.append(i)
+                        score_list.append(complete_score[i])
+                max_score = np.max(score_list)
+                if max_score - global_max >= D:
+                    return False
+        return True
+                
+    def get_ctc_score(self, h, X, 
+                      Y_n=None, Y_b=None):
+        ## h : (L, 1)
+        ## X : (T, E)
+        T = X.size(0)
+        L = len(h)
+        g = h[:-1]
+        c = h[-1]
+        if c == self.eos_id:
+            return np.log((Y_n[T-1][g] + Y_b[T-1][g]).cpu().item() + EPSILON)
+        elif T == 1:
+            return np.log((Y_n[T][h] + Y_b[T][h]).cpu().item())
+        else:
+            Y_n[L-1][h] = X[0, c] if g == (self.sos_id,) else 0
+            Y_b[L-1][h] = 0
+            # psi : Probability for each seq_length
+            psi = Y_n[L-1][h]
+            for t in range(L-1, T):
+                # phi : ctc probability for 'g' before 'c'
+                phi = Y_b[t-1][g] + (0 if g[-1]==c else Y_n[t-1][g])
+                Y_n[t][h] = (Y_n[t-1].get(h, 0) + phi) * X[t, c]
+                Y_b[t][h] = (Y_b[t-1].get(h, 0) + Y_n[t-1].get(h, 0)) * X[t, self.unk_id]
+                psi = psi + phi * X[t, c]
+            return np.log(psi.cpu().item() + EPSILON)
+        
+class AudioVisualConformer(BaseConformer):
+    def __init__(self, config, vocab):
+        super().__init__(config, vocab)
+        self.fusion = FusionModule(config)
+        self.visual = VisualFeatureExtractor(config)
+        self.audio  = AudioFeatureExtractor(config)
+
+    def encode(self,
+               video_inputs, video_input_lengths,
+               audio_inputs, audio_input_lengths,):
         video_inputs, audio_inputs = self.match_seq(video_inputs, audio_inputs)
-        audioFeatures  = self.audio(audio_inputs)
+        audioFeatures  = self.audio(audio_inputs, audio_input_lengths)
         visualFeatures = self.visual(video_inputs,
                                      video_input_lengths,
                                      use_raw_vid=self.config.video.use_raw_vid)
         outputs = self.fusion(visualFeatures, audioFeatures)
-        targets = F.one_hot(targets, num_classes = self.vocab_size)
-        targets = self.target_embedding(targets.to(torch.float32))
-        att_out = F.log_softmax(self.ceLinear(
-            self.decoder(targets, outputs)
-            ), dim=-1)
-        ctc_out = F.log_softmax(self.ctcLinear(outputs), dim=-1)
-        return (att_out, ctc_out)
+        return outputs
         
     def match_seq(self, video_inputs, audio_inputs):
         vid_len = video_inputs.size(2) if self.config.video.use_raw_vid=='on' else video_inputs.size(1)
@@ -54,83 +235,29 @@ class AudioVisualConformer(nn.Module):
         # pdb.set_trace()
         return video_inputs, audio_outputs
 
-class AudioConformer(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-        self.sos_id = int(config.decoder.sos_id)
-        self.eos_id = int(config.decoder.eos_id)
-        self.ctc_att_rate = float(config.decoder.ctc_att_rate)
-        self.vocab_size = config.decoder.vocab_size
+class AudioConformer(BaseConformer):
+    def __init__(self, config, vocab):
+        super().__init__(config, vocab)
         self.audio  = AudioFeatureExtractor(config)
-        self.target_embedding = nn.Linear(self.vocab_size, config.decoder.d_model)
-        self.decoder= TransformerDecoder(config)
-        self.ceLinear = nn.Linear(config.decoder.d_model, self.vocab_size)
-        self.ctcLinear = nn.Linear(config.decoder.d_model, self.vocab_size)
-        
-    def forward(self, 
-                video_inputs, video_input_lengths,
-                audio_inputs, audio_input_lengths,
-                targets, target_lengths, 
-                *args, **kwargs):
-        audio_inputs = audio_inputs
-        audioFeatures  = self.audio(audio_inputs)
-        targets = F.one_hot(targets, num_classes = self.vocab_size)
-        targets = self.target_embedding(targets.to(torch.float32))
-        att_out = F.log_softmax(self.ceLinear(
-            self.decoder(targets, audioFeatures)
-            ), dim=-1)
-        ctc_out = F.log_softmax(self.ctcLinear(audioFeatures), dim=-1)
-        
-        return (att_out, ctc_out)
-        
-    def onePassBeamSearch(self, 
-                          video_inputs, video_input_lengths,
-                          audio_inputs, audio_input_lengths,
-                          *args, **kwargs):
-        audio_inputs = audio_inputs
-        audioFeatures  = self.audio(audio_inputs)
-        
-        # omega_0
-        queue = [torch.tensor([self.sos_id])]
-        
-        output = None
-        
-        # get CTC prediction
-        ctcProb = F.log_softmax(self.ctcLinear(audioFeatures), dim=-1)
-        
-        for l in range(audio_inputs.size(1)):
-            n_queue = []
-            while queue:
-                g = queue.pop()
-                # get Attention prediction
-                attProb = self.decoder(F.one_hot(g, self.vocab_size), audioFeatures, train=False)
-                attProb = F.log_softmax(self.ceLinear(attProb),dim=-1)
-                
-                for c in range(self.vocab_size):
-                    # Loop Except sos token
-                    if c==self.sos_id:
-                        continue
-                    h = torch.cat([g,torch.tensor([c])])
-                    ##########################################
-                    ctc = CTC_prob()
-                    ##########################################
-                    att = attProb[-1,c]
-                    
     
-def CTC_prob(inputs, labels, blank_id=None):
-    _labels = torch.ones((labels.size(0), labels.size(1)*2 + 1)) * blank_id
-    labels[:,1::2] = _labels
-    probs = torch.zeros(labels.size(0), inputs.size(1), labels.size(1))
-    probs[:,0,:2] = 1
-    for i in range(probs.size(1)):
-        for j in range((i+1)*2):
-            for k in range(i*2):
-                probs[:,i, j] += probs[:,i-1, k]
-            letter = labels[:, j]
-            probs[:, i, j] *= inputs[i, letter]
-    ctc_prob = probs[:, -1, -2:].sum(dim=-1)
-    return ctc_prob
-                               
+    def encode(self,
+               video_inputs, video_input_lengths,
+               audio_inputs, audio_input_lengths,):
+        audio_inputs = audio_inputs
+        outputs  = self.audio(audio_inputs, audio_input_lengths,)
+        return outputs
+        
+class VideoConformer(BaseConformer):
+    def __init__(self, config, vocab):
+        super().__init__(config, vocab)
+        self.visual = VisualFeatureExtractor(config)
+    
+    def encode(self,
+               video_inputs, video_input_lengths,
+               audio_inputs, audio_input_lengths,):
+        video_inputs = video_inputs
+        outputs  = self.visual(video_inputs, video_input_lengths)
+        return outputs
     
 class TransformerDecoder(nn.Module):
     '''
@@ -240,14 +367,10 @@ class AudioFeatureExtractor(nn.Module):
         self.front = AudioFrontEnd(config)
         self.back  = AudioBackEnd(config)
         
-    def forward(self, inputs):
-        # pdb.set_trace()
+    def forward(self, inputs, input_lengths):
         outputs = self.front(inputs)
-        # pdb.set_trace()
         outputs = outputs.permute(0,2,1)
-        # pdb.set_trace()
-        outputs = self.back(outputs, inputs.size(0))
-        # pdb.set_trace()
+        outputs = self.back(outputs, inputs.size(0))#input_lengths)
         return outputs
     
 class AudioFrontEnd(nn.Module):
