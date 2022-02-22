@@ -8,10 +8,6 @@ from GPUtil import showUtilization as gpu_usage
 import numpy as np
 import torch
 import torch.nn as nn
-# import torch.distributed.autograd as dist_autograd
-# from torch.nn.parallel import DistributedDataParallel as nn.DataParallel
-# from torch.distributed.optim import DistributedOptimizer
-# from torch.distributed.rpc import RRef
 from torch.utils.data import DataLoader
 
 from dataloader.data_loader import prepare_dataset, _collate_fn
@@ -62,7 +58,6 @@ def train(config, model, dataloader, optimizer, criterion, metric, vocab,
 
         targets = targets.to(device)
         target_lengths = torch.as_tensor(target_lengths).to(device)
-        model = model
         
         if train:
             model_args = [video_inputs, video_input_lengths,\
@@ -83,14 +78,13 @@ def train(config, model, dataloader, optimizer, criterion, metric, vocab,
         # Except SOS
         loss_target = targets[:, 1:]
         
-        loss = criterion(loss_outputs, output_lengths, loss_target, target_lengths, istrain=train)
+        loss = criterion(loss_outputs, loss_target, target_lengths, istrain=train)
         cer = 0.0 # if train else metric(loss_outputs, output_lengths, loss_target, target_lengths)
         cers.append(cer) # add cer on this epoch
         
         if train :
             try:
                 loss.backward()
-                nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
                 optimizer.step()
             except:
                 pass
@@ -134,9 +128,9 @@ def main(config):
 
     if not config.train.resume: # 학습한 경우가 없으면,
         model = build_model(config, vocab)
-        start_epoch =0
-        # if config.train.multi_gpu == True:
-        #     model = nn.DataParallel(model)
+        start_epoch = 0
+        if config.train.multi_gpu == True:
+            model = nn.DataParallel(model)
         model = model.to(device)
    
     else: # 학습한 경우가 있으면,
@@ -152,8 +146,6 @@ def main(config):
             model = nn.DataParallel(model)
         model = model.to(device)    
         print(f'Loaded train logs, start from {resume_checkpoint.epoch+1} epoch')
-        
-    # print(model)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=config.train.learning_rate)
     criterion = get_criterion(config, vocab)
@@ -166,8 +158,6 @@ def main(config):
 
     trainset = prepare_dataset(config, config.train.transcripts_path_train, vocab, Train=True)
     validset = prepare_dataset(config, config.train.transcripts_path_valid, vocab, Train=False)
-    
-    # pdb.set_trace()
     
     collate_fn = lambda batch: _collate_fn(batch, config)
     train_loader = torch.utils.data.DataLoader(dataset=trainset, batch_size=config.train.batch_size,
