@@ -35,13 +35,20 @@ class BaseConformer(nn.Module):
     def forward(self, 
                 video_inputs, video_input_lengths,
                 audio_inputs, audio_input_lengths,
-                targets, target_lengths,
+                targets=None, 
+                target_lengths=None,
                 *args, **kwargs):
         features = self.encode(video_inputs, video_input_lengths,
                                audio_inputs, audio_input_lengths)
-        outputs = self.decode(features, targets)
-        self.debug_count += 1
-        return outputs
+        if targets is None:
+            outputs, output_lengths = self.greedySearch(features)
+        else:
+            outputs = self.decode(features, targets)
+            output_lengths = self.checkLengths(outputs)    
+        
+        # self.debug_count += 1
+        
+        return outputs, output_lengths
         
     def encode(self, 
                video_inputs, video_input_lengths,
@@ -55,9 +62,11 @@ class BaseConformer(nn.Module):
                *args, **kwargs):
         targets = F.one_hot(targets, num_classes = self.vocab_size)
         targets = self.target_embedding(targets.to(torch.float32))
-        att_out = F.log_softmax(self.ceLinear(
-            self.decoder(targets, features)
-            ), dim=-1)
+        
+        att_out = self.decoder(targets, features, pad_id=self.pad_id)
+        att_out = self.ceLinear(att_out)
+        att_out = F.log_softmax(att_out, dim=-1)
+        
         ctc_out = F.log_softmax(self.ctcLinear(features), dim=-1)
         return (att_out, ctc_out)
         
@@ -72,10 +81,61 @@ class BaseConformer(nn.Module):
                                audio_inputs, audio_input_lengths)
         for i in range(audio_inputs.size(0)):
             # _t = time()
-            predictions.append(self.onePassBeamSearch(features[i:i+1]))
+            # predictions.append(self.onePassBeamSearch(features[i:i+1]))
+            predictions.append(self.attGreedySearch(features[i:i+1]))
             # print(f"Predict per input took {time()-_t:.4f}sec...")    
         return torch.cat(predictions, dim=0)
+   
+    def checkLengths(self, outputs):
+        # get length of outputs
+        output = outputs[1] if isinstance(outputs, tuple) else outputs
+        max_len = min(self.config.model.max_len, output.size(1))
+        output_idxs = torch.argmax(output, dim=-1)
+        ended = torch.zeros(output.size(0)).to(output.device).to(bool)
+        output_lengths = torch.ones(output.size(0)).to(output.device).to(int) * max_len
+        for idx in range(output.size(1)):
+            is_eos = output_idxs[:,idx] == self.eos_id
+            output_lengths[is_eos*(~ended)] = idx
+            ended[is_eos] = True
+            if not max_len in output_lengths:
+                break
+        return output_lengths
+            
+    def greedySearch(self, features, *args, **kwargs):
+        max_len = self.config.model.max_len
+        preds = torch.zeros(features.size(0), max_len+1).to(features.device).to(int)
+        pred_lengths = torch.zeros(features.size(0)).to(features.device).to(int)
+        active_batch = torch.ones(features.size(0)).to(features.device).to(bool)
         
+        loop_idx = 0
+        while True:
+            if loop_idx == max_len + 1:
+                # End the loop
+                break 
+            elif loop_idx == 0:
+                # Fill sos_id
+                preds[:,loop_idx] = self.sos_id
+            else:
+                # if unfinished batch exists
+                if active_batch.sum():
+                    targets = F.one_hot(preds[active_batch,:loop_idx], num_classes = self.vocab_size)
+                    targets = self.target_embedding(targets.to(torch.float32))
+                    outputs = self.decoder(targets, features, train=False)
+                    outputs = self.ceLinear(outputs)
+                    topk_ids = outputs.topk(k=1, dim=-1).indices[:,-1,0]
+                    preds[active_batch, loop_idx] = topk_ids
+                    
+                preds[~active_batch, loop_idx] = self.pad_id            
+                pred_lengths[active_batch] = loop_idx - 1
+                active_batch[preds[:, loop_idx] == self.eos_id] = False
+                
+            loop_idx += 1
+            
+        preds = F.one_hot(preds[:,1:], self.vocab_size)
+        preds = torch.log(preds + 1e-13)
+        
+        return preds, pred_lengths
+    
     def onePassBeamSearch(self, 
                       features,
                       *args, **kwargs):
@@ -94,8 +154,9 @@ class BaseConformer(nn.Module):
                   for t in range(features.size(1))}
         Y_b = {t:{(self.sos_id,) : self.pi_sos(t, ctcProb[0])}
                   for t in range(features.size(1))}
-        
-        for l in range(1, min(features.size(1), self.config.model.max_len)):
+                  
+        end_range = min(features.size(1), self.config.model.max_len)
+        for l in range(1, end_range):
             n_queue = []
             n_scores = []
             
@@ -111,7 +172,7 @@ class BaseConformer(nn.Module):
                 # print(f'Attention decoding took {time()-_t:.4f}sec...')
                 
                 candidate_idxs = attScore.topk(k=3, dim=-1).indices[0,-1,:].tolist()
-                candidate_idxs = [self.eos_id, *candidate_idxs]
+                # candidate_idxs = [self.eos_id, *candidate_idxs]
                 # _t = time()
                 for c in candidate_idxs:
                     # Loop Except sos token
@@ -128,7 +189,7 @@ class BaseConformer(nn.Module):
                     score = self.ctc_att_rate * ctc + (1-self.ctc_att_rate) * att
                     score = score.cpu().item()
                     
-                    if c==self.eos_id:
+                    if c==self.eos_id or l==end_range-1:
                         complete_scores.append(score)
                         complete.append(h)
                     else:
@@ -179,7 +240,8 @@ class BaseConformer(nn.Module):
                 max_score = np.max(score_list)
                 if max_score - global_max >= D:
                     return False
-        return True
+            return True
+        return False
                 
     def get_ctc_score(self, h, X, 
                       Y_n=None, Y_b=None):
@@ -243,7 +305,6 @@ class AudioConformer(BaseConformer):
     def encode(self,
                video_inputs, video_input_lengths,
                audio_inputs, audio_input_lengths,):
-        audio_inputs = audio_inputs
         outputs  = self.audio(audio_inputs, audio_input_lengths,)
         return outputs
         
@@ -257,29 +318,6 @@ class VideoConformer(BaseConformer):
                audio_inputs, audio_input_lengths,):
         video_inputs = video_inputs
         outputs  = self.visual(video_inputs, video_input_lengths)
-        return outputs
-    
-class TransformerDecoder(nn.Module):
-    '''
-    Inputs : (B x S x E), (B x T x E)
-    '''
-    def __init__(self, config):
-        super().__init__()
-        decoder = nn.TransformerDecoderLayer(config.decoder.d_model, config.decoder.n_head, 
-                                             config.decoder.ff_dim, config.decoder.dropout_p)
-        self.decoder = nn.TransformerDecoder(decoder, config.decoder.n_layers)
-    def forward(self, labels, inputs, train=True):
-        labels = labels.permute(1,0,2)
-        inputs = inputs.permute(1,0,2)
-        if train:
-            # Generate Label's Mask
-            label_mask = torch.zeros((labels.shape[0], labels.shape[0])).to(inputs.device)
-            for i in range(labels.shape[0]):
-                label_mask[i, i+1:]=1.
-            outputs = self.decoder(labels, inputs, label_mask)
-        else:
-            outputs = self.decoder(labels, inputs)
-        outputs = outputs.permute(1,0,2)
         return outputs
     
 class FusionModule(nn.Module):
@@ -358,7 +396,9 @@ class VisualBackEnd(nn.Module):
                                           config.encoder.n_layers, config.encoder.n_head, input_dropout_p=config.encoder.dropout_p)
         
     def forward(self, inputs, input_lengths):
-        outputs, _ = self.conformer(inputs, input_lengths)
+        outputs = inputs
+        for i, layer in enumerate(self.conformer.layers):
+            outputs = layer(outputs)
         return outputs
         
 class AudioFeatureExtractor(nn.Module):
@@ -370,7 +410,7 @@ class AudioFeatureExtractor(nn.Module):
     def forward(self, inputs, input_lengths):
         outputs = self.front(inputs)
         outputs = outputs.permute(0,2,1)
-        outputs = self.back(outputs, inputs.size(0))#input_lengths)
+        outputs = self.back(outputs, input_lengths)
         return outputs
     
 class AudioFrontEnd(nn.Module):
@@ -408,13 +448,51 @@ class AudioBackEnd(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.conformer = ConformerEncoder(config.encoder.d_model, config.encoder.d_model, 
-                                          config.encoder.n_layers, config.encoder.n_head, input_dropout_p=config.encoder.dropout_p)
+                                          config.encoder.n_layers, config.encoder.n_head, 
+                                          input_dropout_p=config.encoder.dropout_p)
         
     def forward(self, inputs, input_lengths):
-        outputs, _ = self.conformer(inputs, input_lengths)
+        outputs = inputs
+        for i, layer in enumerate(self.conformer.layers):
+            outputs = layer(outputs)
+        return outputs
+   
+
+class TransformerDecoder(nn.Module):
+    '''
+    Inputs : (B x S x E), (B x T x E)
+    '''
+    def __init__(self, config):
+        super().__init__()
+        decoder = nn.TransformerDecoderLayer(config.decoder.d_model, config.decoder.n_head, 
+                                             config.decoder.ff_dim, config.decoder.dropout_p,
+                                             norm_first=True)
+        self.decoder = nn.TransformerDecoder(decoder, config.decoder.n_layers)
+        
+    def forward(self, labels, inputs, train=True, pad_id=None):
+        if train:
+            # Generate Label's Mask
+            # label_mask = torch.zeros((labels.shape[0], labels.shape[0])).to(inputs.device)
+            # for i in range(labels.shape[0]):
+            #     label_mask[i, i+1:]=1.
+            label_mask = nn.Transformer.generate_square_subsequent_mask(labels.shape[1]).to(inputs.device)
+        else:
+            label_mask = None
+        label_pad_mask = self.get_attn_pad_mask(torch.argmax(labels, dim=-1), pad_id)
+        
+        labels = labels.permute(1,0,2)
+        inputs = inputs.permute(1,0,2)
+        outputs = self.decoder(labels, inputs, 
+                               tgt_mask=label_mask,
+                               tgt_key_padding_mask=label_pad_mask)
+        outputs = outputs.permute(1,0,2)
         return outputs
         
-   
+    def get_attn_pad_mask(self, seq, pad):
+        batch_size, len_seq = seq.size()
+        pad_attn_mask = seq.eq(pad)
+        return pad_attn_mask
+
    
 def get_residual_layer(num_layer, in_channels, out_channels, kernel_size, dim=1, identity=False):
     layers = nn.Sequential()
@@ -471,93 +549,3 @@ class ResidualCell2d(nn.Module):
         Fx = self.conv(x)
         x = self.shortcut(x)
         return Fx + x
-        
-        
-
-def split_last(x, shape):
-    "split the last dimension to given shape"
-    shape = list(shape)
-    assert shape.count(-1) <= 1
-    if -1 in shape:
-        shape[shape.index(-1)] = int(x.size(-1) / -np.prod(shape))
-    return x.view(*x.size()[:-1], *shape)
-
-def merge_last(x, n_dims):
-    "merge the last n_dims to a dimension"
-    s = x.size()
-    assert n_dims > 1 and n_dims < len(s)
-    return x.view(*s[:-n_dims], -1)
-
-
-
-class MultiHeadedSelfAttention(nn.Module):
-    """Multi-Headed Dot Product Attention"""
-    def __init__(self, dim, num_heads, dropout):
-        super().__init__()
-        self.l_norm = nn.LayerNorm(dim)
-        self.proj_q = nn.Linear(dim, dim)
-        self.proj_k = nn.Linear(dim, dim)
-        self.proj_v = nn.Linear(dim, dim)
-        self.drop = nn.Dropout(dropout)
-        self.n_heads = num_heads
-        self.scores = None # for visualization
-
-    def forward(self, x, mask):
-        """
-        x, q(query), k(key), v(value) : (B(batch_size), S(seq_len), D(dim))
-        mask : (B(batch_size) x S(seq_len))
-        * split D(dim) into (H(n_heads), W(width of head)) ; D = H * W
-        """
-        
-        _x = x.clone()
-        x = self.l_norm(x)
-        
-        # (B, S, D) -proj-> (B, S, D) -split-> (B, S, H, W) -trans-> (B, H, S, W)
-        q, k, v = self.proj_q(x), self.proj_k(x), self.proj_v(x)
-        q, k, v = (split_last(x, (self.n_heads, -1)).transpose(1, 2) for x in [q, k, v])
-        # (B, H, S, W) @ (B, H, W, S) -> (B, H, S, S) -softmax-> (B, H, S, S)
-        scores = q @ k.transpose(-2, -1) / np.sqrt(k.size(-1))
-        if mask is not None:
-            mask = mask[:, None, None, :].float()
-            scores -= 10000.0 * (1.0 - mask)
-        scores = self.drop(F.softmax(scores, dim=-1))
-        # (B, H, S, S) @ (B, H, S, W) -> (B, H, S, W) -trans-> (B, S, H, W)
-        h = (scores @ v).transpose(1, 2).contiguous()
-        # -merge-> (B, S, D)
-        h = merge_last(h, 2)
-        self.scores = scores
-        return h + _x
-
-
-
-class PositionWiseFeedForward(nn.Module):
-    """FeedForward Neural Networks for each position"""
-    def __init__(self, dim, ff_dim):
-        super().__init__()
-        self.fc1 = nn.Linear(dim, ff_dim)
-        self.fc2 = nn.Linear(ff_dim, dim)
-
-    def forward(self, x):
-        # (B, S, D) -> (B, S, D_ff) -> (B, S, D)
-        return self.fc2(F.gelu(self.fc1(x)))
-    
-    
-    
-class PositionalEmbedding1D(nn.Module):
-    """Adds (optionally learned) positional embeddings to the inputs."""
-
-    def __init__(self, seq_len, dim, train=True):
-        super().__init__()
-        self.dim = dim
-        if train:
-            self.pos_embedding = nn.Parameter(torch.zeros(1, seq_len, dim))
-        else:
-            self.pos_embedding = torch.stack([self.get_angle(pos, torch.arange(dim)) for pos in range(seq_len)])
-    
-    def forward(self, x):
-        """Input has shape `(batch_size, seq_len, emb_dim)`"""
-        return x + self.pos_embedding.to(x.device)
-            
-    def get_angle(self, position, i):
-        angles = 1 / torch.float_power(10000, (2 * (i // 2)) / self.dim)
-        return position * angles

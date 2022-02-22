@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import pdb
+
 import torch
 import torch.nn as nn
 from torch import Tensor
@@ -197,7 +199,6 @@ class ConformerEncoder(nn.Module):
         """
         outputs, output_lengths = self.conv_subsample(inputs, input_lengths)
         outputs = self.input_projection(outputs)
-        for layer in self.layers:
+        for i, layer in enumerate(self.layers):
             outputs = layer(outputs)
-
         return outputs, output_lengths

@@ -12,19 +12,16 @@ train:
     noise_path : 'data_folder/Noise'
 
     ### STATUS ###
-    checkpoint_every : 500  #train ì¤‘ê°„ë§ˆë‹¤ ì €ì¥
-    print_every : 5        #iteration ì¶œë ¥ ì—…ë°ì´íŠ¸ ì£¼ê¸°
-    exp_day : 'audio'
+    checkpoint_every : 500  #train Áß°£¸¶´Ù ÀúÀå
+    print_every : 5        #iteration Ãâ·Â ¾÷µ¥ÀÌÆ® ÁÖ±â
+    exp_day : 'av'
 
     ### TRAIN ###
-    num_epochs : 50
-    batch_size : 4
-    learning_rate : 0.00001
+    num_epochs : 10
+    batch_size : 1
+    learning_rate : 0.0001
 
 
-video: 'off'
-    
-    
 audio:
     feature_extract_by : 'None'
     transform_method : raw
@@ -40,17 +37,24 @@ audio:
     freq_mask_num : 2
     n_channels : 1
 
+
+video:
+    n_channels : 3
+    use_npz    : False
+    use_raw_vid: 'off'
+
+
 model : 
     ## My Model config ##
-    name : conf_a
+    name : conf
     feature: logmelspectrogram
     use_npy: False
     split_balance : 0.1
     max_len  : 150
-
+    
     # Train
     label_smoothing: 0.1
-    alpha : 0.8
+    alpha : 0.5
     
 
 encoder:
@@ -73,5 +77,5 @@ decoder:
 
     attn_mechanism: dot
     use_beam: True
-    beam_width : 1
+    beam_width : 2
     ctc_att_rate : 0.2

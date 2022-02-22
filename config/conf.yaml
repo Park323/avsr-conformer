@@ -17,9 +17,9 @@ train:
     exp_day : 'av'
 
     ### TRAIN ###
-    num_epochs : 10
+    num_epochs : 20
     batch_size : 1
-    learning_rate : 0.0001
+    learning_rate : 0.000001
 
 
 audio:
@@ -54,7 +54,7 @@ model :
     
     # Train
     label_smoothing: 0.1
-    alpha : 0.5
+    alpha : 0.8
     
 
 encoder:
@@ -63,8 +63,6 @@ encoder:
     n_head : 8
     n_layers: 6
     dropout_p: 0.1
-    encoder_bidirectional: True
-    encoder_rnn_type: LSTM
     mask_conv: False
 
 
@@ -77,9 +75,7 @@ decoder:
     n_layers : 6
     vocab_size : 1159
 
-    decoder_attn_mechanism: dot
-    decoder_rnn_type: LSTM
-    decoder_bidirectional: False
-    decoder_use_beam: False
-    
+    attn_mechanism: dot
+    use_beam: True
+    beam_width : 2
     ctc_att_rate : 0.2

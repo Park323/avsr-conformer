@@ -1,36 +1,24 @@
+import pdb
 import Levenshtein as Lev
+import torch
+
 from metric.wer_utils import Code, EditDistance, Token
 
-# def get_metric(config, vocab):
-#     if config.model.name == 'las':
-#         metric = lambda targets, outputs : cer(targets, outputs, vocab)
-#     elif config.model.name in ['conf', 'conf_a']:
-#         idx = 0 if config.model.use_att else 1
-#         metric = lambda targets, outputs : cer(targets, outputs[idx], vocab)
-#     return metric
-
 def get_metric(config, vocab):
-    if config.model.name == 'las':
-        use_idx = -1
-    elif config.model.name in ['conf', 'conf_a']:
-        use_idx = 0 if config.model.use_att else 1
-    return Metric(vocab, use_idx=use_idx)
+    return Metric(vocab)
 
 class Metric:
-    def __init__(self, vocab, use_idx=-1):
+    def __init__(self, vocab):
         super().__init__()
         self.metric = CharacterErrorRate(vocab)
-        self.use_idx = use_idx
         
     def reset(self):
         self.metric.reset()
     
-    def __call__(self, targets, outputs):
-        if self.use_idx != -1:
-            outputs = outputs[self.use_idx]
-        # if self.use_idx == 0:
-        #     outputs = outputs
-        y_hats = outputs.max(-1)[1]
+    def __call__(self, outputs, output_lengths, targets, target_lengths):
+        predicted = torch.argmax(outputs, dim=-1)
+        y_hats = [output[:output_lengths[i].item()] for i, output in enumerate(predicted)]
+        targets = [target[:target_lengths[i].item()] for i, target in enumerate(targets)]
         return self.metric(targets, y_hats)
 
 class ErrorRate(object):
@@ -72,10 +60,10 @@ class ErrorRate(object):
         for (target, y_hat) in zip(targets, y_hats):
             s1 = self.vocab.label_to_string(target)
             s2 = self.vocab.label_to_string(y_hat)
-            # print('======================')
-            # print("Tar: ", s1)
-            # print("Out: ",s2)
-            # print('======================')
+            print('======================')
+            print("Tar: ", s1)
+            print("Out: ",s2)
+            print('======================')
             dist, length = self.metric(s1, s2)
 
             total_dist += dist

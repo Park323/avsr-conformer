@@ -24,6 +24,8 @@ from metric.metric import *
 from metric.loss import *
 from checkpoint.checkpoint import Checkpoint
 
+torch.autograd.set_detect_anomaly(True)
+
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 # os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
@@ -32,20 +34,20 @@ os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 print("cuda : ", torch.cuda.is_available())
 print('Current cuda device:', torch.cuda.current_device())
 print('Count of using GPUs:', torch.cuda.device_count())
-    
+
 def train(config, model, dataloader, optimizer, criterion, metric, vocab,
                     train_begin_time, epoch, summary, device='cuda', train=True):
     log_format = "epoch: {:4d}/{:4d}, step: {:4d}/{:4d}, loss: {:.6f}, " \
                               "cer: {:.2f}, elapsed: {:.2f}s {:.2f}m {:.2f}h, lr: {:.6f}"
     cers = []
     epoch_loss_total = 0.
-    max_grad_norm = 1.
+    max_grad_norm = 5.
     total_num = 0
     timestep = 0
     begin_time = epoch_begin_time = time.time() #모델 학습 시작 시간
 
-    print("Initial GPU Usage")  
-    gpu_usage()
+    # print("Initial GPU Usage")  
+    # gpu_usage()
     
     model.train() if train else model.eval()
     if not train: torch.no_grad()
@@ -62,44 +64,37 @@ def train(config, model, dataloader, optimizer, criterion, metric, vocab,
         target_lengths = torch.as_tensor(target_lengths).to(device)
         model = model
         
-        model_args = [video_inputs, video_input_lengths,\
-                      audio_inputs, audio_input_lengths,\
-                      targets, target_lengths]
+        if train:
+            model_args = [video_inputs, video_input_lengths,\
+                          audio_inputs, audio_input_lengths,\
+                          targets, target_lengths]
+        else:
+            model_args = [video_inputs, video_input_lengths,\
+                          audio_inputs, audio_input_lengths]
         
         with torch.cuda.amp.autocast():
-            if train:
-                outputs = model(*model_args)
-            else:
-                outputs = model.module.predict(*model_args)
-        
-        # get length of outputs
-        _outputs = outputs[1] if isinstance(outputs, tuple) else outputs
-        output_lengths = torch.zeros(_outputs.size(0)).to(_outputs.device).to(int)
-        for idx, output in enumerate(_outputs):
-            for k in range(output.size(0)):
-                if torch.argmax(output[k]) == vocab.eos_id:
-                    break
-            output_lengths[idx] = k # except eos
+            outputs, output_lengths = model(*model_args)
         
         # drop final_token from outputs & drop sos_token from targets
         if isinstance(outputs, tuple):
             loss_outputs = (outputs[0][:,:-1,:], outputs[1])
         else:
             loss_outputs = outputs[:,:-1,:]
+        # Except SOS
         loss_target = targets[:, 1:]
         
-        loss = criterion(loss_outputs, output_lengths, loss_target, target_lengths) if train else torch.tensor(0)
-        pdb.set_trace()
-        cer = 0.0 if train else metric(loss_outputs, output_lengths, loss_target, target_lengths)
+        loss = criterion(loss_outputs, output_lengths, loss_target, target_lengths, istrain=train)
+        cer = 0.0 # if train else metric(loss_outputs, output_lengths, loss_target, target_lengths)
         cers.append(cer) # add cer on this epoch
         
-        if not torch.isfinite(loss):
-            pdb.set_trace()
         if train :
-            loss.backward()
-            # nn.utils.clip_grad_norm_(model.module.parameters(), max_grad_norm)
-            optimizer.step()
-
+            try:
+                loss.backward()
+                nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
+                optimizer.step()
+            except:
+                pass
+                
         total_num += 1
         epoch_loss_total += loss.item()
 
@@ -140,8 +135,8 @@ def main(config):
     if not config.train.resume: # 학습한 경우가 없으면,
         model = build_model(config, vocab)
         start_epoch =0
-        if config.train.multi_gpu == True:
-            model = nn.DataParallel(model)
+        # if config.train.multi_gpu == True:
+        #     model = nn.DataParallel(model)
         model = model.to(device)
    
     else: # 학습한 경우가 있으면,
@@ -187,6 +182,8 @@ def main(config):
     train_begin_time = time.time()
     print('Train start')
     for epoch in range(start_epoch, config.train.num_epochs):
+        if epoch > 0:
+            train_loader.shuffle=True
         #######################################           Train             ###############################################
         train_loss, train_cer = train(config, model, train_loader, optimizer, criterion, train_metric, vocab,
                                          train_begin_time, epoch, summary, device)
@@ -199,19 +196,20 @@ def main(config):
         print(tr_sentences)
         train_metric.reset()
         
-        ######################         Valid          ######################
-        valid_loss, valid_cer = train(config, model, valid_loader, optimizer, criterion, train_metric, vocab,
-                                      train_begin_time, epoch, summary, device, train=False)
-        
-        val_sentences = 'Epoch %d Validation Loss %0.4f CER %0.5f '% (epoch+1, valid_loss, valid_cer)
-        
-        summary.add_scalar('valid/loss',valid_loss,epoch)
-        summary.add_scalar('valid/cer',valid_cer,epoch)
-
-        print(val_sentences)
-        train_metric.reset()
-        
         Checkpoint(model, optimizer, epoch+1, config=config).save()
+        
+    ######################         Valid          ######################
+    #valid_loss, valid_cer = train(config, model, valid_loader, optimizer, criterion, train_metric, vocab,
+    #                              train_begin_time, epoch, summary, device, train=False)
+    
+    #val_sentences = 'Epoch %d Validation Loss %0.4f CER %0.5f '% (epoch+1, valid_loss, valid_cer)
+    
+    #summary.add_scalar('valid/loss',valid_loss,epoch)
+    #summary.add_scalar('valid/cer',valid_cer,epoch)
+
+    #print(val_sentences)
+    #train_metric.reset()
+        
         
 def get_args():
     parser = argparse.ArgumentParser(description='각종 옵션')

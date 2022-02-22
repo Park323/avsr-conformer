@@ -61,6 +61,11 @@ def generate_character_script(videos_paths, audios_paths, transcripts, test=Fals
         trainsets = tmp[:-val_num]
         valsets = tmp[-val_num:]
     
+        ### Sort Train Set ###
+        def get_transcripts_length(dataset):
+            return len(dataset[2])
+        trainsets = sorted(tmp, key=get_transcripts_length)
+        
         for mode, tmp in zip(['Train', 'Valid'],[trainsets, valsets]):
             with open(os.path.join('./dataset/'+mode+".txt"), "w") as f:
                 videos_paths,audios_paths, transcripts = zip(*tmp)
@@ -110,6 +115,7 @@ def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('-d', '--data_folder', type=str, required=True)
     parser.add_argument('-v', '--video_folder', type=str)
+    parser.add_argument('-s', '--valid_rate', type=float)
     parser.add_argument('-t', '--test', action='store_true')
     args = parser.parse_args()
     return args
@@ -121,4 +127,4 @@ if __name__ == '__main__':
     args = get_args()
     test = args.test
     videos_paths, audios_paths, transcripts = preprocess(args, test=test)
-    generate_character_script(videos_paths,audios_paths, transcripts, test=test)
+    generate_character_script(videos_paths,audios_paths, transcripts, test=test, valid_rate=args.valid_rate)
