@@ -14,15 +14,16 @@ train:
     ### STATUS ###
     checkpoint_every : 500  #train 중간마다 저장
     print_every : 5        #iteration 출력 업데이트 주기
-    exp_day : 'audio'
+    exp_day : 'aud1'
 
     ### TRAIN ###
-    num_epochs : 50
-    batch_size : 8
+    num_epochs : 200
+    batch_size : 4
     learning_rate : 0.0001
 
 
-video: 'off'
+video:
+    use_vid: False
     
     
 audio:
@@ -74,4 +75,4 @@ decoder:
     attn_mechanism: dot
     use_beam: True
     beam_width : 1
-    ctc_att_rate : 0.2
+    ctc_att_rate : 1.0

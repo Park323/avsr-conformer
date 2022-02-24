@@ -53,18 +53,16 @@ def generate_character_script(videos_paths, audios_paths, transcripts, test=Fals
     if mode == 'Train':
         char2id, id2char = load_label("./dataset/labels.csv")
         
-        tmp = list(zip(videos_paths, audios_paths, transcripts))
+        dataset = list(zip(videos_paths, audios_paths, transcripts))
         
         ### Train/Valid Split ###
-        random.shuffle(tmp)
-        val_num = int(valid_rate*len(tmp))
-        trainsets = tmp[:-val_num]
-        valsets = tmp[-val_num:]
+        random.shuffle(dataset)
+        val_num = int(valid_rate*len(dataset))
+        trainsets = dataset[:-val_num]
+        valsets = dataset[-val_num:]
     
-        ### Sort Train Set ###
-        def get_transcripts_length(dataset):
-            return len(dataset[2])
-        trainsets = sorted(tmp, key=get_transcripts_length)
+        ### Sort Train Set by the length of transcripts ###
+        trainsets = sorted(trainsets, key=lambda x: len(x[2]))
         
         for mode, tmp in zip(['Train', 'Valid'],[trainsets, valsets]):
             with open(os.path.join('./dataset/'+mode+".txt"), "w") as f:

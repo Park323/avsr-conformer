@@ -79,12 +79,14 @@ class BaseConformer(nn.Module):
         predictions = []
         features = self.encode(video_inputs, video_input_lengths, 
                                audio_inputs, audio_input_lengths)
-        for i in range(audio_inputs.size(0)):
-            # _t = time()
-            # predictions.append(self.onePassBeamSearch(features[i:i+1]))
-            predictions.append(self.attGreedySearch(features[i:i+1]))
-            # print(f"Predict per input took {time()-_t:.4f}sec...")    
-        return torch.cat(predictions, dim=0)
+                               
+        predictions = self.greedySearch(features)
+#        for i in range(audio_inputs.size(0)):
+#             _t = time()
+#             predictions.append(self.onePassBeamSearch(features[i:i+1]))
+#             print(f"Predict per input took {time()-_t:.4f}sec...")
+#             predictions = torch.cat(predictions, dim=0)    
+        return predictions
    
     def checkLengths(self, outputs):
         # get length of outputs
@@ -103,39 +105,127 @@ class BaseConformer(nn.Module):
             
     def greedySearch(self, features, *args, **kwargs):
         max_len = self.config.model.max_len
-        preds = torch.zeros(features.size(0), max_len+1).to(features.device).to(int)
-        pred_lengths = torch.zeros(features.size(0)).to(features.device).to(int)
-        active_batch = torch.ones(features.size(0)).to(features.device).to(bool)
-        
+        preds = torch.full((features.size(0), max_len+1), self.pad_id).to(features.device).to(int)
+        pred_lengths = torch.full((features.size(0),), 0, dtype=int, device=features.device)
+        active_batch = torch.full((features.size(0),), True, dtype=bool, device=features.device)
+                
         loop_idx = 0
-        while True:
-            if loop_idx == max_len + 1:
-                # End the loop
+        while loop_idx <= max_len:
+            # End the loop
+            if active_batch.sum()==0:
                 break 
+            # Fill sos_id
             elif loop_idx == 0:
-                # Fill sos_id
                 preds[:,loop_idx] = self.sos_id
+            # if unfinished batch exists
             else:
-                # if unfinished batch exists
-                if active_batch.sum():
-                    targets = F.one_hot(preds[active_batch,:loop_idx], num_classes = self.vocab_size)
-                    targets = self.target_embedding(targets.to(torch.float32))
-                    outputs = self.decoder(targets, features, train=False)
-                    outputs = self.ceLinear(outputs)
-                    topk_ids = outputs.topk(k=1, dim=-1).indices[:,-1,0]
-                    preds[active_batch, loop_idx] = topk_ids
-                    
-                preds[~active_batch, loop_idx] = self.pad_id            
-                pred_lengths[active_batch] = loop_idx - 1
+                targets = F.one_hot(preds[active_batch,:loop_idx], num_classes = self.vocab_size)
+                targets = self.target_embedding(targets.to(torch.float32))
+                outputs = self.decoder(targets, features[active_batch], train=False, pad_id=self.pad_id)
+                outputs = self.ceLinear(outputs)
+                topk_ids = outputs.topk(k=1, dim=-1).indices[:,-1,0]
+                preds[active_batch, loop_idx] = topk_ids
+                
+                pred_lengths[active_batch] += 1
                 active_batch[preds[:, loop_idx] == self.eos_id] = False
                 
             loop_idx += 1
             
-        preds = F.one_hot(preds[:,1:], self.vocab_size)
-        preds = torch.log(preds + 1e-13)
+        preds = F.one_hot(preds[:,1:], self.vocab_size).to(float)
+        preds = F.log_softmax(preds, dim=-1)
         
         return preds, pred_lengths
     
+    def hybridSearch(self, features, *args, **kwargs):
+        max_len = self.config.model.max_len
+        preds = torch.full((features.size(0), max_len+1), self.pad_id, dtype=int, device=features.device)
+        pred_lengths = torch.full((features.size(0),), 0, dtype=int, device=features.device)
+        active_batch = torch.full((features.size(0),), True, dtype=bool, device=features.device)
+        ctc_outputs = F.softmax(self.ctcLinear(features), dim=-1)
+        
+        Y_n = [{t:{(self.sos_id,) : torch.tensor(0)} for t in range(features.size(1))} 
+               for i in range(features.size(0))]
+        Y_b = [{t:{(self.sos_id,) : self.pi_sos(t, ctc_outputs[i])} for t in range(features.size(1))}
+               for i in range(features.size(0))]
+                  
+        loop_idx = 0
+        while loop_idx <= max_len and loop_idx < ctc_outputs.size(1):
+            # End the loop
+            if active_batch.sum()==0:
+                break 
+            # Fill sos_id
+            elif loop_idx == 0:
+                preds[:,loop_idx] = self.sos_id
+            # if unfinished batch exists
+            else:
+                ### attention
+                targets = F.one_hot(preds[active_batch,:loop_idx], num_classes = self.vocab_size)
+                targets = self.target_embedding(targets.to(torch.float32))
+                outputs = self.decoder(targets, features[active_batch], train=False, pad_id=self.pad_id)
+                outputs = self.ceLinear(outputs)
+                att_scores = F.log_softmax(outputs[:,-1], dim=-1)
+                
+                ### CTC
+                ctc_scores = torch.zeros_like(att_scores)
+                # candidate_idxs = range(self.vocab_size) # Full Search
+                candidate_idxs = att_scores.topk(k=5, dim=-1).indices[:,:] # Partial Search
+                for i, g in enumerate(preds[active_batch, :loop_idx]):
+                    for c in candidate_idxs[i]:
+                        h = torch.cat([g,torch.tensor([c], device=g.device)])
+                        ctc_scores[i, c] = self.get_ctc_score(tuple(h.tolist()), ctc_outputs[i], Y_n[i], Y_b[i])
+                
+                ### Integrate scores
+                scores = self.ctc_att_rate * ctc_scores + (1-self.ctc_att_rate) * att_scores
+                topk_ids = scores.topk(k=1, dim=-1).indices[:,0]
+                
+                preds[active_batch, loop_idx] = topk_ids
+                
+                pred_lengths[active_batch] += 1
+                active_batch[preds[:, loop_idx] == self.eos_id] = False
+                
+            loop_idx += 1
+            
+        preds = F.one_hot(preds[:,1:], self.vocab_size).to(float)
+        preds = F.log_softmax(preds, dim=-1)
+        
+        return preds, pred_lengths
+        
+    def get_ctc_score(self, h, X, 
+                      Y_n=None, Y_b=None):
+        ## h : (L, 1)
+        ## X : (T, E)
+        T = X.size(0)
+        L = len(h)
+        g = h[:-1]
+        c = h[-1]
+        if c == self.eos_id:
+            try: Y_b[T-1][g]
+            except: self.get_ctc_score(g, X, Y_n, Y_b)
+            return np.log((Y_n[T-1][g] + Y_b[T-1][g]).cpu().item() + EPSILON)
+        elif T == 1:
+            return np.log((Y_n[T][h] + Y_b[T][h]).cpu().item())
+        else:
+            Y_n[L-1][h] = X[0, c] if g == (self.sos_id,) else 0
+            Y_b[L-1][h] = 0
+            # psi : Probability for each seq_length
+            psi = Y_n[L-1][h]
+            for t in range(L-1, T):
+                # phi : ctc probability for 'g' before 'c'
+                try: Y_b[t-1][g]
+                except: self.get_ctc_score(g, X, Y_n, Y_b)
+                finally:
+                    phi = Y_b[t-1][g] + (0 if g[-1]==c else Y_n[t-1][g])
+                Y_n[t][h] = (Y_n[t-1].get(h, 0) + phi) * X[t, c]
+                Y_b[t][h] = (Y_b[t-1].get(h, 0) + Y_n[t-1].get(h, 0)) * X[t, self.unk_id]
+                psi = psi + phi * X[t, c]
+            return np.log(psi.cpu().item() + EPSILON)
+
+    def pi_sos(self, t, prob):
+        y = 1
+        for i in range(t):
+            y *= prob[i, self.unk_id]
+        return y
+        
     def onePassBeamSearch(self, 
                       features,
                       *args, **kwargs):
@@ -167,7 +257,7 @@ class BaseConformer(nn.Module):
                 # get Attention prediction
                 labels = F.one_hot(g, self.vocab_size).unsqueeze(0).to(features.device)
                 labels = self.target_embedding(labels.to(torch.float32))
-                attProb = self.decoder(labels, features, train=False)
+                attProb = self.decoder(labels, features, train=False, pad_id=self.pad_id)
                 attScore = F.log_softmax(self.ceLinear(attProb),dim=-1)
                 # print(f'Attention decoding took {time()-_t:.4f}sec...')
                 
@@ -219,12 +309,6 @@ class BaseConformer(nn.Module):
         
         # pdb.set_trace()
         return best_guess
-
-    def pi_sos(self, t, prob):
-        y = 1
-        for i in range(t):
-            y *= prob[i, self.unk_id]
-        return y 
             
     def EndDetect(self, l, complete_list, complete_score, D=-1.5, M=3):
         if complete_score:
@@ -243,31 +327,7 @@ class BaseConformer(nn.Module):
             return True
         return False
                 
-    def get_ctc_score(self, h, X, 
-                      Y_n=None, Y_b=None):
-        ## h : (L, 1)
-        ## X : (T, E)
-        T = X.size(0)
-        L = len(h)
-        g = h[:-1]
-        c = h[-1]
-        if c == self.eos_id:
-            return np.log((Y_n[T-1][g] + Y_b[T-1][g]).cpu().item() + EPSILON)
-        elif T == 1:
-            return np.log((Y_n[T][h] + Y_b[T][h]).cpu().item())
-        else:
-            Y_n[L-1][h] = X[0, c] if g == (self.sos_id,) else 0
-            Y_b[L-1][h] = 0
-            # psi : Probability for each seq_length
-            psi = Y_n[L-1][h]
-            for t in range(L-1, T):
-                # phi : ctc probability for 'g' before 'c'
-                phi = Y_b[t-1][g] + (0 if g[-1]==c else Y_n[t-1][g])
-                Y_n[t][h] = (Y_n[t-1].get(h, 0) + phi) * X[t, c]
-                Y_b[t][h] = (Y_b[t-1].get(h, 0) + Y_n[t-1].get(h, 0)) * X[t, self.unk_id]
-                psi = psi + phi * X[t, c]
-            return np.log(psi.cpu().item() + EPSILON)
-        
+    
 class AudioVisualConformer(BaseConformer):
     def __init__(self, config, vocab):
         super().__init__(config, vocab)

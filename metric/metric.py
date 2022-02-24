@@ -15,11 +15,11 @@ class Metric:
     def reset(self):
         self.metric.reset()
     
-    def __call__(self, outputs, output_lengths, targets, target_lengths):
+    def __call__(self, outputs, output_lengths, targets, target_lengths, show=False):
         predicted = torch.argmax(outputs, dim=-1)
         y_hats = [output[:output_lengths[i].item()] for i, output in enumerate(predicted)]
         targets = [target[:target_lengths[i].item()] for i, target in enumerate(targets)]
-        return self.metric(targets, y_hats)
+        return self.metric(targets, y_hats, show)
 
 class ErrorRate(object):
     """
@@ -37,14 +37,14 @@ class ErrorRate(object):
         self.total_dist = 0.0
         self.total_length = 0.0
 
-    def __call__(self, targets, y_hats):
+    def __call__(self, targets, y_hats, show=None):
         """ Calculating character error rate """
-        dist, length = self._get_distance(targets, y_hats)
+        dist, length = self._get_distance(targets, y_hats, show=show)
         self.total_dist += dist
         self.total_length += length
         return self.total_dist / self.total_length
 
-    def _get_distance(self, targets, y_hats):
+    def _get_distance(self, targets, y_hats, show=None):
         """
         Provides total character distance between targets & y_hats
         Args:
@@ -60,10 +60,11 @@ class ErrorRate(object):
         for (target, y_hat) in zip(targets, y_hats):
             s1 = self.vocab.label_to_string(target)
             s2 = self.vocab.label_to_string(y_hat)
-            print('======================')
-            print("Tar: ", s1)
-            print("Out: ",s2)
-            print('======================')
+            if show:
+                print('======================')
+                print("Tar: ", s1)
+                print("Out: ",s2)
+                print('======================')
             dist, length = self.metric(s1, s2)
 
             total_dist += dist

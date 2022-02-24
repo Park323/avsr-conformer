@@ -126,11 +126,11 @@ class AV_Dataset(Dataset):
         self._augment(spec_augment)
 
     def __getitem__(self, index):
-        if self.config.video == 'off':
+        if self.config.video.use_vid:
+            video_feature = self.parse_video(self.video_paths[index])
+        else:
             # return dummy video feature
             video_feature = torch.Tensor([[0]])
-        else:
-            video_feature = self.parse_video(self.video_paths[index])
         audio_feature = self.parse_audio(self.audio_paths[index],self.augment_methods)
         transcript = self.parse_transcript(self.transcripts[index])
         korean_transcript = self.parse_korean_transcripts(self.korean_transcripts[index])
@@ -268,9 +268,7 @@ def _collate_fn(batch, config):
     # B T C     --> B C T
     seqs = seqs.permute(0,2,1)
         
-    use_vid = config.video!='off'
-    
-    if use_vid :
+    if config.video.use_vid :
         raw = config.video.use_raw_vid == 'on'
         vid_lengths = [len(s[0]) for s in batch]
         max_vid_sample = max(batch, key=vid_length_)[0]

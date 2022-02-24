@@ -53,9 +53,9 @@ class Attention_Loss(nn.Module):
         self.att   = LabelSmoothingLoss(len(vocab), ignore_index=vocab.pad_id,
                                         smoothing=config.model.label_smoothing)
         
-    def forward(self, outputs, targets):
+    def forward(self, outputs, targets, *args, **kwargs):
         out = outputs.contiguous().view(-1,outputs.shape[-1])
-        loss = self.att(out, targets)
+        loss = self.att(out, targets.contiguous().view(-1))
         return loss
 
 class LabelSmoothingLoss(nn.Module):
