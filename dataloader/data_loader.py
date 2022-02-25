@@ -221,7 +221,7 @@ class AV_Dataset(Dataset):
         return len(self.audio_paths)
 
 
-def _collate_fn(batch, config):
+def _collate_fn(batch, config, pad_id=0):
     
     """ functions that pad to the maximum sequence length """
     def vid_length_(p):
@@ -252,7 +252,7 @@ def _collate_fn(batch, config):
     feat_size = max_seq_sample.size(1)
     seqs = torch.zeros(batch_size, max_seq_size, feat_size)
     targets = torch.zeros(batch_size, max_target_size).to(torch.long)
-    targets.fill_(0)
+    targets.fill_(pad_id)
     
     # pdb.set_trace()
     for x in range(batch_size):
@@ -299,8 +299,8 @@ def _collate_fn(batch, config):
             vids = vids.permute(0,4,1,2,3)
 
     else:
-        vids = torch.tensor([[0]])
-        vid_lengths = torch.tensor([0]*batch_size)
+        vids = torch.zeros((batch_size, 1))
+        vid_lengths = torch.zeros((batch_size,)).to(int)
     
     return vids, seqs, targets, vid_lengths, seq_lengths, target_lengths
 

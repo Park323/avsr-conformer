@@ -9,13 +9,15 @@ class Checkpoint(object):
     def __init__(
             self,
             model = None,                   
-            optimizer = None,                     
+            optimizer = None,                   
+            scheduler = None,
             epoch = None,     
             config=None,                    
     ):
 
         self.model = model
         self.optimizer = optimizer
+        self.scheduler = scheduler
         self.epoch = epoch
         self.exp_day = config.train.exp_day
         self.architecture = config.model.name
@@ -29,6 +31,7 @@ class Checkpoint(object):
 
         trainer_states = {
             'optimizer': self.optimizer,
+            'scheduler': self.scheduler,
             'epoch': self.epoch
         }
         
@@ -55,6 +58,7 @@ class Checkpoint(object):
         return Checkpoint(
             model=model, 
             optimizer=resume_checkpoint['optimizer'],
+            scheduler=resume_checkpoint['scheduler'],
             epoch=epoch,
             config = self.config,
         )

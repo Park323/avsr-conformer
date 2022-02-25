@@ -30,7 +30,7 @@ print('Current cuda device:', torch.cuda.current_device())
 print('Count of using GPUs:', torch.cuda.device_count())
 
 
-def train_on_epoch(config, model, dataloader, optimizer, criterion, metric, vocab,
+def train_on_epoch(config, model, dataloader, optimizer, scheduler, criterion, metric, vocab,
                    train_begin_time, epoch, summary, device='cuda', train=True):
     log_format = "epoch: {:4d}/{:4d}, step: {:4d}/{:4d}, loss: {:.6f}, " \
                               "cer: {:.2f}, elapsed: {:.2f}s {:.2f}m {:.2f}h, lr: {:.6f}"
@@ -65,7 +65,7 @@ def train_on_epoch(config, model, dataloader, optimizer, criterion, metric, voca
         # Except SOS
         loss_target = targets[:, 1:]
         
-        loss = criterion(loss_outputs, loss_target, target_lengths, istrain=train)
+        loss = criterion(loss_outputs, loss_target)
         cer = metric(loss_outputs[0], output_lengths, loss_target, target_lengths)
         cers.append(cer) # add cer on this epoch
         
@@ -97,6 +97,8 @@ def train_on_epoch(config, model, dataloader, optimizer, criterion, metric, voca
     summary.add_scalar('learning_rate/lr',optimizer.state_dict()['param_groups'][0]['lr'],epoch)
     train_loss, train_cer = epoch_loss_total / total_num, sum(cers) / len(cers)
 
+    scheduler.step(train_loss)
+
     return train_loss, train_cer
 
 
@@ -110,6 +112,8 @@ def train(config):
         if config.train.multi_gpu == True:
             model = nn.DataParallel(model)
         model = model.to(device)
+        optimizer = torch.optim.Adam(model.parameters(), lr=config.train.learning_rate)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, patience=2)
    
     else: 
         checkpoint = Checkpoint(config=config)
@@ -117,6 +121,7 @@ def train(config):
         resume_checkpoint = checkpoint.load(latest_checkpoint_path)
         model = resume_checkpoint.model
         optimizer = resume_checkpoint.optimizer
+        scheduler = resume_checkpoint.scheduler
         start_epoch = resume_checkpoint.epoch
         if isinstance(model, nn.DataParallel):
             model = model.module
@@ -125,7 +130,6 @@ def train(config):
         model = model.to(device)
         print(f'Loaded train logs, start from {resume_checkpoint.epoch+1} epoch')
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=config.train.learning_rate)
     criterion = get_criterion(config, vocab)
     train_metric = get_metric(config, vocab)
 
@@ -135,18 +139,14 @@ def train(config):
     summary = SummaryWriter(tensorboard_path)
 
     trainset = prepare_dataset(config, config.train.transcripts_path_train, vocab, Train=True)
-#    validset = prepare_dataset(config, config.train.transcripts_path_valid, vocab, Train=False)
     
-    collate_fn = lambda batch: _collate_fn(batch, config)
+    collate_fn = lambda batch: _collate_fn(batch, config, pad_id=vocab.pad_id)
     train_loader_0 = torch.utils.data.DataLoader(dataset=trainset, batch_size=config.train.batch_size,
                                                  shuffle=False, collate_fn = collate_fn, 
                                                  num_workers=config.train.num_workers)
     train_loader = torch.utils.data.DataLoader(dataset=trainset, batch_size=config.train.batch_size,
                                                shuffle=True, collate_fn = collate_fn, 
                                                num_workers=config.train.num_workers)
-#    valid_loader = torch.utils.data.DataLoader(dataset=validset, batch_size=config.train.batch_size,
-#                                               shuffle=False, collate_fn = collate_fn, 
-#                                               num_workers=config.train.num_workers)
     
     print(f'trainset : {len(trainset)}, {len(train_loader)} batches')
     
@@ -157,7 +157,7 @@ def train(config):
         data = train_loader if epoch else train_loader_0
         
         train_loss, train_cer = train_on_epoch(config, model, train_loader, 
-                                               optimizer, criterion, train_metric, vocab,
+                                               optimizer, scheduler, criterion, train_metric, vocab,
                                                train_begin_time, epoch, summary, device)
         
         tr_sentences = 'Epoch %d Training Loss %0.4f CER %0.5f '% (epoch+1, train_loss, train_cer)
@@ -168,7 +168,7 @@ def train(config):
         print(tr_sentences)
         train_metric.reset()
         
-        Checkpoint(model, optimizer, epoch+1, config=config).save()
+        Checkpoint(model, optimizer, scheduler, epoch+1, config=config).save()
 
 
 def test(config):
@@ -176,13 +176,17 @@ def test(config):
     vocab = KsponSpeechVocabulary(config.train.vocab_label)
 
     model = torch.load(config.model.model_path, map_location=lambda storage, loc: storage).to(device)
+    module = model.module if isinstance(model, nn.DataParallel) else model
+    module.config.model.max_len = config.model.max_len 
+    module.config.decoder.method = 'att_only'#'hybrid'
+    # module.config.decoder.ctc_att_rate = 0.
     model.eval()
-
+    
     criterion = Attention_Loss(config, vocab)
     metric = get_metric(config, vocab)
 
-    collate_fn = lambda batch: _collate_fn(batch, config)
-    validset = prepare_dataset(config, config.train.transcripts_path_train, vocab, Train=False)
+    collate_fn = lambda batch: _collate_fn(batch, config, pad_id=vocab.pad_id)
+    validset = prepare_dataset(config, config.train.transcripts_path_valid, vocab, Train=False)
     valid_loader = torch.utils.data.DataLoader(dataset=validset, batch_size=config.train.batch_size,
                                                shuffle=False, collate_fn = collate_fn, 
                                                num_workers=config.train.num_workers)
@@ -206,9 +210,9 @@ def test(config):
             target_lengths = torch.as_tensor(target_lengths).to(device)
             
             model_args = [video_inputs, video_input_lengths,\
-                          audio_inputs, audio_input_lengths]
+                          audio_inputs, audio_input_lengths,]
                           
-            outputs, output_lengths = model.module.predict(*model_args) if isinstance(model, nn.DataParallel) else model.predict(*model_args)
+            outputs, output_lengths = model(*model_args)
 #            for i in range(y_hats.size(0)):
 #                submission.append(vocab.label_to_string(y_hats[i].cpu().detach().numpy()))
 
@@ -217,13 +221,16 @@ def test(config):
             # Except SOS
             loss_target = targets[:, 1:]
             
-            loss += criterion(loss_outputs, loss_target, target_lengths, istrain=train).cpu().item()
-            cer += metric(loss_outputs, output_lengths, loss_target, target_lengths, show=True)
+            batch_loss = criterion(loss_outputs, loss_target, target_lengths).cpu().item()
+            batch_cer =metric(loss_outputs, output_lengths, loss_target, target_lengths, show=True) 
+            loss += batch_loss
+            cer += batch_cer
             
             progress_bar.set_description(
-                f'{i+1}/{len(valid_loader)}, Loss:{loss/(i+1)} CER:{cer/(i+1)}'
+                f'{i+1}/{len(valid_loader)}, Loss:{batch_loss} CER:{batch_cer}'
             )
             
+    print(f'Mean Loss : {loss/(i+1)} Mean CER : {cer/(i+1)}')
 
 def main(config):
     random.seed(config.train.seed)

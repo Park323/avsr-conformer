@@ -41,10 +41,13 @@ class BaseConformer(nn.Module):
         features = self.encode(video_inputs, video_input_lengths,
                                audio_inputs, audio_input_lengths)
         if targets is None:
-            outputs, output_lengths = self.greedySearch(features)
+            if self.config.decoder.method=='hybrid':
+                outputs, output_lengths = self.hybridSearch(features)
+            elif self.config.decoder.method=='att_only':
+                outputs, output_lengths = self.greedySearch(features)
         else:
             outputs = self.decode(features, targets)
-            output_lengths = self.checkLengths(outputs)    
+            output_lengths = self.checkLengths(outputs[0])
         
         # self.debug_count += 1
         
@@ -63,39 +66,20 @@ class BaseConformer(nn.Module):
         targets = F.one_hot(targets, num_classes = self.vocab_size)
         targets = self.target_embedding(targets.to(torch.float32))
         
-        att_out = self.decoder(targets, features, pad_id=self.pad_id)
+        att_out = self.decoder(targets, features)
         att_out = self.ceLinear(att_out)
         att_out = F.log_softmax(att_out, dim=-1)
         
         ctc_out = F.log_softmax(self.ctcLinear(features), dim=-1)
         return (att_out, ctc_out)
-        
-    def predict(self, 
-                video_inputs=None, 
-                video_input_lengths=None,
-                audio_inputs=None, 
-                audio_input_lengths=None,
-                *args, **kwargs):
-        predictions = []
-        features = self.encode(video_inputs, video_input_lengths, 
-                               audio_inputs, audio_input_lengths)
-                               
-        predictions = self.greedySearch(features)
-#        for i in range(audio_inputs.size(0)):
-#             _t = time()
-#             predictions.append(self.onePassBeamSearch(features[i:i+1]))
-#             print(f"Predict per input took {time()-_t:.4f}sec...")
-#             predictions = torch.cat(predictions, dim=0)    
-        return predictions
    
     def checkLengths(self, outputs):
         # get length of outputs
-        output = outputs[1] if isinstance(outputs, tuple) else outputs
-        max_len = min(self.config.model.max_len, output.size(1))
-        output_idxs = torch.argmax(output, dim=-1)
-        ended = torch.zeros(output.size(0)).to(output.device).to(bool)
-        output_lengths = torch.ones(output.size(0)).to(output.device).to(int) * max_len
-        for idx in range(output.size(1)):
+        max_len = min(self.config.model.max_len, outputs.size(1))
+        output_idxs = torch.argmax(outputs, dim=-1)
+        ended = torch.zeros(outputs.size(0)).to(outputs.device).to(bool)
+        output_lengths = torch.ones(outputs.size(0)).to(outputs.device).to(int) * max_len
+        for idx in range(outputs.size(1)):
             is_eos = output_idxs[:,idx] == self.eos_id
             output_lengths[is_eos*(~ended)] = idx
             ended[is_eos] = True
@@ -104,7 +88,7 @@ class BaseConformer(nn.Module):
         return output_lengths
             
     def greedySearch(self, features, *args, **kwargs):
-        max_len = self.config.model.max_len
+        max_len = self.config.model.max_len 
         preds = torch.full((features.size(0), max_len+1), self.pad_id).to(features.device).to(int)
         pred_lengths = torch.full((features.size(0),), 0, dtype=int, device=features.device)
         active_batch = torch.full((features.size(0),), True, dtype=bool, device=features.device)
@@ -121,7 +105,7 @@ class BaseConformer(nn.Module):
             else:
                 targets = F.one_hot(preds[active_batch,:loop_idx], num_classes = self.vocab_size)
                 targets = self.target_embedding(targets.to(torch.float32))
-                outputs = self.decoder(targets, features[active_batch], train=False, pad_id=self.pad_id)
+                outputs = self.decoder(targets, features[active_batch], pad_id=self.pad_id)
                 outputs = self.ceLinear(outputs)
                 topk_ids = outputs.topk(k=1, dim=-1).indices[:,-1,0]
                 preds[active_batch, loop_idx] = topk_ids
@@ -159,23 +143,29 @@ class BaseConformer(nn.Module):
             # if unfinished batch exists
             else:
                 ### attention
-                targets = F.one_hot(preds[active_batch,:loop_idx], num_classes = self.vocab_size)
+                targets = F.one_hot(preds[active_batch, :loop_idx], num_classes = self.vocab_size)
                 targets = self.target_embedding(targets.to(torch.float32))
-                outputs = self.decoder(targets, features[active_batch], train=False, pad_id=self.pad_id)
+                outputs = self.decoder(targets, features[active_batch], pad_id=self.pad_id)
                 outputs = self.ceLinear(outputs)
                 att_scores = F.log_softmax(outputs[:,-1], dim=-1)
                 
                 ### CTC
-                ctc_scores = torch.zeros_like(att_scores)
-                # candidate_idxs = range(self.vocab_size) # Full Search
-                candidate_idxs = att_scores.topk(k=5, dim=-1).indices[:,:] # Partial Search
-                for i, g in enumerate(preds[active_batch, :loop_idx]):
-                    for c in candidate_idxs[i]:
-                        h = torch.cat([g,torch.tensor([c], device=g.device)])
-                        ctc_scores[i, c] = self.get_ctc_score(tuple(h.tolist()), ctc_outputs[i], Y_n[i], Y_b[i])
+                if self.ctc_att_rate:
+                    ctc_scores = torch.zeros_like(att_scores)
+                    ctc_scores.fill_(-float('inf'))
+                    # candidate_idxs = range(self.vocab_size) # Full Search
+                    candidate_idxs = att_scores.topk(k=3, dim=-1).indices[:,:] # Partial Search
+                    for i, g in enumerate(preds[active_batch, :loop_idx]):
+                        for c in candidate_idxs[i]:
+                            h = torch.cat([g,torch.tensor([c], device=g.device)])
+                            ctc_score = self.get_ctc_score(tuple(h.tolist()), ctc_outputs[i], Y_n[i], Y_b[i])
+                            ctc_scores[i, c] = ctc_score
+                    
+                    ### Integrate scores
+                    scores = self.ctc_att_rate * ctc_scores + (1-self.ctc_att_rate) * att_scores
+                else:
+                    scores = att_scores
                 
-                ### Integrate scores
-                scores = self.ctc_att_rate * ctc_scores + (1-self.ctc_att_rate) * att_scores
                 topk_ids = scores.topk(k=1, dim=-1).indices[:,0]
                 
                 preds[active_batch, loop_idx] = topk_ids
@@ -529,22 +519,15 @@ class TransformerDecoder(nn.Module):
                                              norm_first=True)
         self.decoder = nn.TransformerDecoder(decoder, config.decoder.n_layers)
         
-    def forward(self, labels, inputs, train=True, pad_id=None):
-        if train:
-            # Generate Label's Mask
-            # label_mask = torch.zeros((labels.shape[0], labels.shape[0])).to(inputs.device)
-            # for i in range(labels.shape[0]):
-            #     label_mask[i, i+1:]=1.
-            label_mask = nn.Transformer.generate_square_subsequent_mask(labels.shape[1]).to(inputs.device)
-        else:
-            label_mask = None
-        label_pad_mask = self.get_attn_pad_mask(torch.argmax(labels, dim=-1), pad_id)
+    def forward(self, labels, inputs, pad_id=None):
+        label_mask = nn.Transformer.generate_square_subsequent_mask(labels.shape[1]).to(inputs.device)
+        # label_pad_mask = self.get_attn_pad_mask(torch.argmax(labels, dim=-1), pad_id)
         
         labels = labels.permute(1,0,2)
         inputs = inputs.permute(1,0,2)
         outputs = self.decoder(labels, inputs, 
-                               tgt_mask=label_mask,
-                               tgt_key_padding_mask=label_pad_mask)
+                               tgt_mask=label_mask,)
+                               #tgt_key_padding_mask=label_pad_mask)
         outputs = outputs.permute(1,0,2)
         return outputs
         
