@@ -23,9 +23,9 @@ class BaseConformer(nn.Module):
         self.eos_id = vocab.eos_id
         self.unk_id = vocab.unk_id
         self.pad_id = vocab.pad_id
+        self.vocab_size = len(vocab)
         self.ctc_att_rate = config.decoder.ctc_att_rate
         self.beam_width = config.decoder.beam_width
-        self.vocab_size = config.decoder.vocab_size
         self.target_embedding = nn.Linear(self.vocab_size, config.decoder.d_model)
         self.decoder= TransformerDecoder(config)
         self.ceLinear = nn.Linear(config.decoder.d_model, self.vocab_size)
@@ -48,9 +48,10 @@ class BaseConformer(nn.Module):
         else:
             outputs = self.decode(features, targets)
             output_lengths = self.checkLengths(outputs[0])
-        
+            
         # self.debug_count += 1
-        
+        if (~torch.isfinite(outputs[0])).sum() or (~torch.isfinite(outputs[1])).sum():
+            pdb.set_trace()
         return outputs, output_lengths
         
     def encode(self, 
@@ -479,7 +480,8 @@ class AudioFrontEnd(nn.Module):
         self.conv3 = get_residual_layer(2, 64, 128, 3)
         self.conv4 = get_residual_layer(2, 128, 256, 3)
         self.conv5 = get_residual_layer(2, 256, config.encoder.d_model, 3)
-        self.avg_pool = nn.AvgPool1d(21, 20, padding=10) # -> 30fps
+        #self.avg_pool = nn.AvgPool1d(21, 20, padding=10) # -> 30fps
+        self.avg_pool = nn.AvgPool1d(21, 10, padding=10) # -> 60fps
         
     def forward(self, inputs):
         outputs = self.conv1(inputs)

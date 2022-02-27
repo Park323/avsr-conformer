@@ -43,7 +43,6 @@ def train_on_epoch(config, model, dataloader, optimizer, scheduler, criterion, m
     
     progress_bar = tqdm(enumerate(dataloader),ncols=110)
     for i, (video_inputs,audio_inputs,targets,video_input_lengths,audio_input_lengths,target_lengths) in progress_bar:
-        optimizer.zero_grad()
         
         video_inputs = video_inputs.to(device)
         video_input_lengths = video_input_lengths.to(device)
@@ -56,7 +55,7 @@ def train_on_epoch(config, model, dataloader, optimizer, scheduler, criterion, m
         model_args = [video_inputs, video_input_lengths,\
                       audio_inputs, audio_input_lengths,\
                       targets, target_lengths]
-        
+                      
         with torch.cuda.amp.autocast():
             outputs, output_lengths = model(*model_args)
         
@@ -65,12 +64,15 @@ def train_on_epoch(config, model, dataloader, optimizer, scheduler, criterion, m
         # Except SOS
         loss_target = targets[:, 1:]
         
-        loss = criterion(loss_outputs, loss_target)
+        loss = criterion(loss_outputs, loss_target, target_lengths)
         cer = metric(loss_outputs[0], output_lengths, loss_target, target_lengths)
         cers.append(cer) # add cer on this epoch
         
         loss.backward()
+        #print("####GRAD#####")
+        #print(model.module.ceLinear.weight.grad)
         optimizer.step()
+        optimizer.zero_grad()
         
         total_num += 1
         epoch_loss_total += loss.item()
@@ -178,7 +180,7 @@ def test(config):
     model = torch.load(config.model.model_path, map_location=lambda storage, loc: storage).to(device)
     module = model.module if isinstance(model, nn.DataParallel) else model
     module.config.model.max_len = config.model.max_len 
-    module.config.decoder.method = 'att_only'#'hybrid'
+    # module.config.decoder.method = 'att_only'#'hybrid'
     # module.config.decoder.ctc_att_rate = 0.
     model.eval()
     

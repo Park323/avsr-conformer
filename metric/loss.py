@@ -21,11 +21,11 @@ class CTC_Attention_Loss(nn.Module):
         super().__init__()
         self.config = config
         self.vocab = vocab
-        self.ctc   = nn.CTCLoss(blank=vocab.unk_id, reduction='mean', zero_infinity=True)
-        self.att   = LabelSmoothingLoss(len(vocab), #ignore_index=vocab.pad_id,
+        self.ctc   = nn.CTCLoss(blank=vocab.unk_id, reduction='mean', zero_infinity=False)
+        self.att   = LabelSmoothingLoss(len(vocab), ignore_index=vocab.pad_id,
                                         smoothing=config.model.label_smoothing)
         
-    def forward(self, outputs, targets):
+    def forward(self, outputs, targets, target_lengths):
         # alpha value
         a = self.config.model.alpha
         
@@ -33,11 +33,12 @@ class CTC_Attention_Loss(nn.Module):
         ctc_out = outputs[1].contiguous().permute(1,0,2) # (B,L,E)->(L,B,E)
         
         output_lengths = torch.full((ctc_out.size(1),), ctc_out.size(0), dtype=int)
-        target_lengths = torch.full((targets.size(0),), targets.size(1), dtype=int)
+        # target_lengths = torch.full((targets.size(0),), targets.size(1), dtype=int)
         
         att_loss = self.att(att_out, targets.contiguous().view(-1))
         ctc_loss = self.ctc(ctc_out, targets, output_lengths, target_lengths)
-        
+        print()
+        print(att_loss, ctc_loss)
         loss = a*att_loss + (1-a)*ctc_loss
         
         return loss

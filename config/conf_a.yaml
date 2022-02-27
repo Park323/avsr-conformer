@@ -1,8 +1,8 @@
 train:
     ### GPU / WORKERS / SEED #####
     seed : 1023
-    multi_gpu : True
-    num_workers : 4
+    multi_gpu : False
+    num_workers : 3
 
     ### DATASET ###
     transcripts_path_train : 'dataset/Train.txt'
@@ -13,12 +13,12 @@ train:
     ### STATUS ###
     checkpoint_every : 500  #train 중간마다 저장
     print_every : 5        #iteration 출력 업데이트 주기
-    exp_day : 'aud3'
+    exp_day : 'audT'
 
     ### TRAIN ###
     num_epochs : 200
     batch_size : 4
-    learning_rate : 0.0001
+    learning_rate : 0.1
 
 
 video:
@@ -46,7 +46,7 @@ model :
     feature: logmelspectrogram
     use_npy: False
     split_balance : 0.1
-    max_len  : 120
+    max_len  : 350
 
     # Train
     label_smoothing: 0.1
@@ -69,7 +69,6 @@ decoder:
     ff_dim   : 512
     dropout_p: 0.3
     n_layers : 6
-    vocab_size : 1159
 
     attn_mechanism: dot
     method : hybrid

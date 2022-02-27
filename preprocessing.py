@@ -1,3 +1,5 @@
+#-*-coding:utf-8-*-
+
 import os
 import re
 import random
@@ -7,6 +9,84 @@ import pandas as pd
 import pdb
 import argparse
 
+# 유니코드 한글 시작 : 44032, 끝 : 55203
+BASE_CODE, CHOSUNG, JUNGSUNG = 44032, 588, 28
+END_CODE = 55203
+
+# 초성 리스트. 00 ~ 18
+CHOSUNG_LIST = ['ㄱ', 'ㄲ', 'ㄴ', 'ㄷ', 'ㄸ', 'ㄹ', 'ㅁ', 'ㅂ', 'ㅃ', 'ㅅ', 'ㅆ', 'ㅇ', 'ㅈ', 'ㅉ', 'ㅊ', 'ㅋ', 'ㅌ', 'ㅍ', 'ㅎ']
+
+# 중성 리스트. 00 ~ 20
+JUNGSUNG_LIST = ['ㅏ', 'ㅐ', 'ㅑ', 'ㅒ', 'ㅓ', 'ㅔ', 'ㅕ', 'ㅖ', 'ㅗ', 'ㅘ', 'ㅙ', 'ㅚ', 'ㅛ', 'ㅜ', 'ㅝ', 'ㅞ', 'ㅟ', 'ㅠ', 'ㅡ', 'ㅢ', 'ㅣ']
+
+# 종성 리스트. 00 ~ 27 + 1(1개 없음)
+JONGSUNG_LIST = ['#', 'ㄱ', 'ㄲ', 'ㄳ', 'ㄴ', 'ㄵ', 'ㄶ', 'ㄷ', 'ㄹ', 'ㄺ', 'ㄻ', 'ㄼ', 'ㄽ', 'ㄾ', 'ㄿ', 'ㅀ', 'ㅁ', 'ㅂ', 'ㅄ', 'ㅅ', 'ㅆ', 'ㅇ', 'ㅈ', 'ㅊ', 'ㅋ', 'ㅌ', 'ㅍ', 'ㅎ']
+
+def convert_to_JASO(test_keyword):
+    split_keyword_list = list(test_keyword)
+    #print(split_keyword_list)
+
+    result = list()
+    for keyword in split_keyword_list:
+        # 한글 여부 check 후 분리
+        if re.match('.*[ㄱ-ㅎㅏ-ㅣ가-힣]+.*', keyword) is not None:
+            char_code = ord(keyword) - BASE_CODE
+            char1 = int(char_code / CHOSUNG)
+            result.append(CHOSUNG_LIST[char1])
+            #print('초성 : {}'.format(CHOSUNG_LIST[char1]))
+            char2 = int((char_code - (CHOSUNG * char1)) / JUNGSUNG)
+            result.append(JUNGSUNG_LIST[char2])
+            #print('중성 : {}'.format(JUNGSUNG_LIST[char2]))
+            char3 = int((char_code - (CHOSUNG * char1) - (JUNGSUNG * char2)))
+            if char3==0:
+                result.append('##')
+            else:
+                result.append(f'#{JONGSUNG_LIST[char3]}')
+            #print('종성 : {}'.format(JONGSUNG_LIST[char3]))
+        else:
+            result.append(keyword)
+    # result
+    return result
+
+
+def convert_to_char(JASOlist):
+    id2KR = {code-BASE_CODE+5:chr(code)
+             for code in range(BASE_CODE ,END_CODE + 1)}
+    id2KR[0] = '<pad>'
+    id2KR[1] = '<sos>'
+    id2KR[2] = '<eos>' 
+    id2KR[3] = '<unk>'
+    id2KR[4] = ' '
+    KR2id = {key:value for value, key in id2KR.items()}
+    
+    result = list()
+    chr_count = 0
+    chr_id = 5
+
+    lists = [CHOSUNG_LIST, JUNGSUNG_LIST, JONGSUNG_LIST]
+    nums = [CHOSUNG, JUNGSUNG, 1]
+    
+       
+    for JS in JASOlist:
+        JS = JS[1:] if JS[0]=='#' else JS
+        if JS in ['<pad>', '<sos>', '<eos>', '<unk>', ' ']:
+            chr_id = KR2id[JS]
+        else:
+            try:
+                chr_id += lists[chr_count].index(JS) * nums[chr_count]
+                chr_count += 1
+            except:
+                chr_count = 3
+                chr_id = KR2id['<unk>']
+        
+        if chr_count == 3:
+            result.append(chr_id)
+            if JS=='<eos>':
+                return result
+            chr_count = 0
+            chr_id = 5
+    
+    return result
 
 def load_label(filepath):
     char2id = dict()
@@ -16,7 +96,7 @@ def load_label(filepath):
 
     id_list = ch_labels["id"]
     char_list = ch_labels["char"]
-    freq_list = ch_labels["freq"]
+    freq_list = ch_labels.get("freq", id_list)
 
     for (id_, char, freq) in zip(id_list, char_list, freq_list):
         char2id[char] = id_
@@ -68,7 +148,8 @@ def generate_character_script(videos_paths, audios_paths, transcripts, test=Fals
             with open(os.path.join('./dataset/'+mode+".txt"), "w") as f:
                 videos_paths,audios_paths, transcripts = zip(*tmp)
                 for video_path, audio_path,transcript in zip(videos_paths,audios_paths, transcripts):
-                    char_id_transcript = sentence_to_target(transcript, char2id)
+                    # char_id_transcript = sentence_to_target(transcript, char2id)
+                    char_id_transcript = sentence_to_target(convert_to_JASO(transcript), char2id)
                     f.write(f'{video_path}\t{audio_path}\t{transcript}\t{char_id_transcript}\n')
     else:
         with open(os.path.join('./dataset/'+mode+'.txt'),'w') as f:

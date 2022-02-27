@@ -50,7 +50,7 @@ model :
     feature: logmelspectrogram
     use_npy: False
     split_balance : 0.1
-    max_len  : 150
+    max_len  : 350
     
     # Train
     label_smoothing: 0.1
@@ -73,7 +73,6 @@ decoder:
     ff_dim   : 512
     dropout_p: 0.3
     n_layers : 6
-    vocab_size : 1159
 
     method : hybrid
     attn_mechanism: dot
