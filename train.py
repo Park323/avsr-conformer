@@ -57,15 +57,19 @@ def train(config, model, dataloader, optimizer, criterion, metric, vocab,
         target_lengths = torch.as_tensor(target_lengths).to(device)
         model = model
         
-        model_args = [video_inputs, video_input_lengths,\
-                      audio_inputs, audio_input_lengths,\
-                      targets, target_lengths]
+        if train:
+            model_args = [video_inputs, video_input_lengths,\
+                          audio_inputs, audio_input_lengths,\
+                          targets, target_lengths]
+        else:
+            model_args = [video_inputs, video_input_lengths,\
+                          audio_inputs, audio_input_lengths,]
         
         with torch.cuda.amp.autocast():
             outputs = model(*model_args)
         
         loss_target = targets[:, 1:]
-        loss = criterion(outputs, loss_target)
+        loss = criterion(outputs, loss_target, target_lengths)
         cer = metric(loss_target, outputs)
         cers.append(cer) # add cer on this epoch
         
@@ -78,14 +82,6 @@ def train(config, model, dataloader, optimizer, criterion, metric, vocab,
         epoch_loss_total += loss.item()
 
         timestep += 1
-        
-        # print("GPU Usage after allcoating a bunch of Tensors")  
-        # gpu_usage()
-        del outputs
-        torch.cuda.empty_cache()
-        torch.cuda.synchronize()
-        # print("GPU Usage after emptying the cache")  
-        # gpu_usage()
         
         if timestep % config.train.print_every == 0:
             current_time = time.time()
@@ -147,6 +143,7 @@ def main(config):
 
     optimizer = torch.optim.Adam(model.parameters(), lr=config.train.learning_rate)
     criterion = get_criterion(config, vocab)
+    #criterion = Attention_Loss(config, vocab)
     train_metric = get_metric(config, vocab)
 
     tensorboard_path = f'outputs/tensorboard/{config.model.name}/{config.train.exp_day}'
@@ -173,7 +170,7 @@ def main(config):
     for epoch in range(start_epoch, config.train.num_epochs):
         #######################################           Train             ###############################################
         train_loss, train_cer = train(config, model, train_loader, optimizer, criterion, train_metric, vocab,
-                                         train_begin_time, epoch, summary, device)
+                                         train_begin_time, epoch, summary, device, train=True)
         
         tr_sentences = 'Epoch %d Training Loss %0.4f CER %0.5f '% (epoch+1, train_loss, train_cer)
         
@@ -183,20 +180,75 @@ def main(config):
         print(tr_sentences)
         train_metric.reset()
         
-        ######################         Valid          ######################
-        valid_loss, valid_cer = train(config, model, valid_loader, optimizer, criterion, train_metric, vocab,
-                                      train_begin_time, epoch, summary, device, train=False)
-        
-        val_sentences = 'Epoch %d Validation Loss %0.4f CER %0.5f '% (epoch+1, valid_loss, valid_cer)
-        
-        summary.add_scalar('valid/loss',valid_loss,epoch)
-        summary.add_scalar('valid/cer',valid_cer,epoch)
-
-        print(val_sentences)
-        train_metric.reset()
+#        ######################         Valid          ######################
+#        valid_loss, valid_cer = train(config, model, valid_loader, optimizer, criterion, train_metric, vocab,
+#                                      train_begin_time, epoch, summary, device, train=False)
+#        
+#        val_sentences = 'Epoch %d Validation Loss %0.4f CER %0.5f '% (epoch+1, valid_loss, valid_cer)
+#        
+#        summary.add_scalar('valid/loss',valid_loss,epoch)
+#        summary.add_scalar('valid/cer',valid_cer,epoch)
+#
+#        print(val_sentences)
+#        train_metric.reset()
         
         Checkpoint(model, optimizer, epoch+1, config=config).save()
-        
+
+
+def test(config):
+    
+    vocab = KsponSpeechVocabulary(config.train.vocab_label)
+
+    model = torch.load(config.model.model_path, map_location=lambda storage, loc: storage).to(device)
+    model.eval()
+
+    criterion = Attention_Loss(config, vocab)
+    metric = get_metric(config, vocab)
+
+    collate_fn = lambda batch: _collate_fn(batch, config)
+    validset = prepare_dataset(config, config.train.transcripts_path_valid, vocab, Train=False)
+    valid_loader = torch.utils.data.DataLoader(dataset=validset, batch_size=config.train.batch_size,
+                                               shuffle=False, collate_fn = collate_fn, 
+                                               num_workers=config.train.num_workers)
+    
+    print(f'validset : {len(validset)}, {len(valid_loader)} batches')
+    
+    begin_time = time.time()
+    print('Test Start')
+    
+    loss = 0.
+    cer = 0.
+    
+    with torch.no_grad():
+        progress_bar = tqdm(enumerate(valid_loader),ncols=110)
+        for i, (video_inputs,audio_inputs,targets,video_input_lengths,audio_input_lengths,target_lengths) in progress_bar:
+            video_inputs = video_inputs.to(device)
+            video_input_lengths = video_input_lengths.to(device)
+            audio_inputs = audio_inputs.to(device)
+            audio_input_lengths = audio_input_lengths.to(device)
+            targets = targets.to(device)
+            target_lengths = torch.as_tensor(target_lengths).to(device)
+            
+            model_args = [video_inputs, video_input_lengths,\
+                          audio_inputs, audio_input_lengths]
+                          
+            outputs, output_lengths = model.module.predict(*model_args) if isinstance(model, nn.DataParallel) else model.predict(*model_args)
+#            for i in range(y_hats.size(0)):
+#                submission.append(vocab.label_to_string(y_hats[i].cpu().detach().numpy()))
+
+            # drop final_token from outputs & drop sos_token from targets
+            loss_outputs = outputs[:,:-1,:]
+            # Except SOS
+            loss_target = targets[:, 1:]
+            
+            loss += criterion(loss_outputs, loss_target, target_lengths, istrain=train).cpu().item()
+            cer += metric(loss_outputs, output_lengths, loss_target, target_lengths, show=True)
+            
+            progress_bar.set_description(
+                f'{i+1}/{len(valid_loader)}, Loss:{loss/(i+1)} CER:{cer/(i+1)}'
+            )
+
+
 def get_args():
     parser = argparse.ArgumentParser(description='각종 옵션')
     parser.add_argument('-r','--resume',

@@ -15,9 +15,9 @@ def build_model(config, vocab):
     if model_name=='las':
         model = build_las_model(config, vocab=vocab)
     elif model_name=='conf':
-        model = build_conf_model(config, 'multi')
+        model = build_conf_model(config, 'multi', vocab=vocab)
     elif model_name=='conf_a':
-        model = build_conf_model(config, 'audio')
+        model = build_conf_model(config, 'audio', vocab=vocab)
         
     print("model parameter ")
     print(count_parameters(model))
@@ -26,9 +26,9 @@ def build_model(config, vocab):
 def build_las_model(config, vocab=None, *args, **kargs):
     return ListenAttendSpell(config, vocab) 
 
-def build_conf_model(config, mode, *args, **kargs):
+def build_conf_model(config, mode, vocab=None, *args, **kargs):
     if mode=='multi':
-        model = AudioVisualConformer(config)
+        model = AudioVisualConformer(config, vocab)
     elif mode=='audio':
-        model = AudioConformer(config)
+        model = AudioConformer(config, vocab)
     return model

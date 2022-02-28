@@ -14,10 +14,10 @@ train:
     ### STATUS ###
     checkpoint_every : 500  #train 중간마다 저장
     print_every : 5        #iteration 출력 업데이트 주기
-    exp_day : 'audio'
+    exp_day : 'old0'
 
     ### TRAIN ###
-    num_epochs : 1
+    num_epochs : 2
     batch_size : 4
     learning_rate : 0.0001
 

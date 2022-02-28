@@ -1,5 +1,6 @@
 import Levenshtein as Lev
 from metric.wer_utils import Code, EditDistance, Token
+import pdb
 
 # def get_metric(config, vocab):
 #     if config.model.name == 'las':
@@ -72,10 +73,12 @@ class ErrorRate(object):
         for (target, y_hat) in zip(targets, y_hats):
             s1 = self.vocab.label_to_string(target)
             s2 = self.vocab.label_to_string(y_hat)
-            # print('======================')
-            # print("Tar: ", s1)
-            # print("Out: ",s2)
-            # print('======================')
+            '''
+            print('======================')
+            print("Tar: ", s1)
+            print("Out: ",s2)
+            print('======================')
+            '''
             dist, length = self.metric(s1, s2)
 
             total_dist += dist
