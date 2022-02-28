@@ -37,8 +37,7 @@ class CTC_Attention_Loss(nn.Module):
         
         att_loss = self.att(att_out, targets.contiguous().view(-1))
         ctc_loss = self.ctc(ctc_out, targets, output_lengths, target_lengths)
-        print()
-        print(att_loss, ctc_loss)
+        
         loss = a*att_loss + (1-a)*ctc_loss
         
         return loss

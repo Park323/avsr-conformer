@@ -65,7 +65,7 @@ def train_on_epoch(config, model, dataloader, optimizer, scheduler, criterion, m
         loss_target = targets[:, 1:]
         
         loss = criterion(loss_outputs, loss_target, target_lengths)
-        cer = metric(loss_outputs[0], output_lengths, loss_target, target_lengths)
+        cer = metric(loss_outputs[0], output_lengths, loss_target, target_lengths, show=False)
         cers.append(cer) # add cer on this epoch
         
         loss.backward()

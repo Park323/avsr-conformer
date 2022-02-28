@@ -3,6 +3,7 @@ import Levenshtein as Lev
 import torch
 
 from metric.wer_utils import Code, EditDistance, Token
+from dataloader.vocabulary import convert_to_char
 
 def get_metric(config, vocab):
     return Metric(vocab)
@@ -32,6 +33,8 @@ class ErrorRate(object):
         self.total_dist = 0.0
         self.total_length = 0.0
         self.vocab = vocab
+        self.use_jaso = True
+        self.converter = convert_to_char if self.use_jaso else lambda x: x
 
     def reset(self):
         self.total_dist = 0.0
@@ -58,8 +61,10 @@ class ErrorRate(object):
         total_length = 0
 
         for (target, y_hat) in zip(targets, y_hats):
-            s1 = self.vocab.label_to_string(target)
-            s2 = self.vocab.label_to_string(y_hat)
+            s1 = self.vocab.label_to_string(target, tolist=self.use_jaso)
+            s2 = self.vocab.label_to_string(y_hat, tolist=self.use_jaso)
+            s1 = self.converter(s1)
+            s2 = self.converter(s2)
             if show:
                 print('======================')
                 print("Tar: ", s1)

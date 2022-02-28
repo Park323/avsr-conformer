@@ -382,6 +382,8 @@ class FusionModule(nn.Module):
         )
         
     def forward(self, visualFeatures, audioFeatures):
+        if visualFeatures.size(1) != audioFeatures.size(1):
+            visualFeatures = torch.repeat_interleave(visualFeatures, 2, dim=1)
         features = torch.cat([visualFeatures, audioFeatures], dim=-1)
         batch_seq_size = features.shape[:2]
         features = torch.flatten(features, end_dim=1)
