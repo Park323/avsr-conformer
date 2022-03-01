@@ -60,12 +60,12 @@ def train_on_epoch(config, model, dataloader, optimizer, scheduler, criterion, m
             outputs, output_lengths = model(*model_args)
         
         # drop final_token from outputs & drop sos_token from targets
-        loss_outputs = (outputs[0][:,:-1,:], outputs[1]) if isinstance(outputs, tuple) else outputs[:,:-1,:]
+        loss_outputs = outputs[0][:,:-1,:] if isinstance(outputs, tuple) else outputs[:,:-1,:]
         # Except SOS
         loss_target = targets[:, 1:]
         
         loss = criterion(loss_outputs, loss_target, target_lengths)
-        cer = metric(loss_outputs[0], output_lengths, loss_target, target_lengths, show=False)
+        cer = metric(loss_outputs, output_lengths, loss_target, target_lengths, show=False)
         cers.append(cer) # add cer on this epoch
         
         loss.backward()

@@ -8,7 +8,10 @@ def get_criterion(config, vocab):
     if config.model.name == 'las':
         criterion = Attention_Loss(config, vocab)
     elif config.model.name in ['conf', 'conf_a']:
-        criterion = CTC_Attention_Loss(config, vocab)
+        if config.decoder.method=='hybrid':
+            criterion = CTC_Attention_Loss(config, vocab)
+        elif config.decoder.method=='att_only':
+            criterion = Attention_Loss(config, vocab)
     return criterion
 
 class CTC_Attention_Loss(nn.Module):
@@ -39,7 +42,8 @@ class CTC_Attention_Loss(nn.Module):
         ctc_loss = self.ctc(ctc_out, targets, output_lengths, target_lengths)
         
         loss = a*att_loss + (1-a)*ctc_loss
-        
+        #print()
+        #print(att_loss, ctc_loss)
         return loss
     
 class Attention_Loss(nn.Module):

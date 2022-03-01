@@ -47,11 +47,12 @@ class BaseConformer(nn.Module):
                 outputs, output_lengths = self.greedySearch(features)
         else:
             outputs = self.decode(features, targets)
-            output_lengths = self.checkLengths(outputs[0])
+            output_for_length = outputs[0] if self.config.decoder.method=='hybrid' else outputs 
+            output_lengths = self.checkLengths(output_for_length)
             
         # self.debug_count += 1
-        if (~torch.isfinite(outputs[0])).sum() or (~torch.isfinite(outputs[1])).sum():
-            pdb.set_trace()
+        # if (~torch.isfinite(outputs[0])).sum() or (~torch.isfinite(outputs[1])).sum():
+        #     pdb.set_trace()
         return outputs, output_lengths
         
     def encode(self, 
@@ -70,6 +71,9 @@ class BaseConformer(nn.Module):
         att_out = self.decoder(targets, features)
         att_out = self.ceLinear(att_out)
         att_out = F.log_softmax(att_out, dim=-1)
+        
+        if self.config.decoder.method == 'att_only':
+            return att_out
         
         ctc_out = F.log_softmax(self.ctcLinear(features), dim=-1)
         return (att_out, ctc_out)
