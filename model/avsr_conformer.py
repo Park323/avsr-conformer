@@ -48,8 +48,6 @@ class AudioVisualConformer(nn.Module):
 class AudioConformer(nn.Module):
     def __init__(self, config, vocab):
         super().__init__()
-        self.config = config
-        self.vocab = vocab
         self.vocab_size = config.decoder.vocab_size
         self.audio  = AudioFeatureExtractor(config)
         self.target_embedding = nn.Linear(self.vocab_size, config.decoder.d_model)
@@ -85,6 +83,7 @@ class AudioConformer(nn.Module):
                 
         loop_idx = 0
         while loop_idx <= max_len:
+            pdb.set_trace()
             # End the loop
             if active_batch.sum()==0:
                 break 
@@ -209,15 +208,27 @@ class TransformerDecoder(nn.Module):
     def __init__(self, config):
         super().__init__()
         decoder = nn.TransformerDecoderLayer(config.decoder.d_model, config.decoder.n_head, 
-                                             config.decoder.ff_dim, config.decoder.dropout_p, batch_first=True)
+                                             config.decoder.ff_dim, config.decoder.dropout_p)
         self.decoder = nn.TransformerDecoder(decoder, config.decoder.n_layers)
     def forward(self, labels, inputs, train=True, **kwargs):
-        label_mask = torch.zeros((labels.shape[1], labels.shape[1])).to(inputs.device)
-        for i in range(labels.shape[1]):
-            label_mask[i, i+1:]=1.
+        pad_id = 0
+        
+        label_mask = nn.Transformer.generate_square_subsequent_mask(labels.shape[1]).to(inputs.device)
+        label_pad_mask = self.get_attn_pad_mask(torch.argmax(labels, dim=-1), pad_id)
+        
+        labels = labels.permute(1,0,2)
+        inputs = inputs.permute(1,0,2)
+        
         outputs = self.decoder(labels, inputs, 
-                                tgt_mask=label_mask)
+                               tgt_mask=label_mask,
+                               tgt_key_padding_mask=label_pad_mask)
+        
+        outputs=outputs.permute(1,0,2)
         return outputs
+    def get_attn_pad_mask(self, seq, pad):
+        batch_size, len_seq = seq.size()
+        pad_attn_mask = seq.eq(pad)
+        return pad_attn_mask
     
 class FusionModule(nn.Module):
     def __init__(self, config):

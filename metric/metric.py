@@ -27,8 +27,8 @@ class Metric:
         self.metric.reset()
     
     def __call__(self, targets, outputs):
-        if self.use_idx != -1:
-            outputs = outputs[self.use_idx]
+#        if self.use_idx != -1:
+#            outputs = outputs[self.use_idx]
         # if self.use_idx == 0:
         #     outputs = outputs
         y_hats = outputs.max(-1)[1]
@@ -73,12 +73,12 @@ class ErrorRate(object):
         for (target, y_hat) in zip(targets, y_hats):
             s1 = self.vocab.label_to_string(target)
             s2 = self.vocab.label_to_string(y_hat)
-            '''
-            print('======================')
-            print("Tar: ", s1)
-            print("Out: ",s2)
-            print('======================')
-            '''
+            with open('log2.txt', 'a') as f:
+                f.write('======================\n')
+                f.write(f"Tar: {s1}\n")
+                f.write(f"Out: {s2}\n")
+                f.write('======================\n')
+            
             dist, length = self.metric(s1, s2)
 
             total_dist += dist

@@ -56,7 +56,7 @@ def train(config, model, dataloader, optimizer, criterion, metric, vocab,
         targets = targets.to(device)
         target_lengths = torch.as_tensor(target_lengths).to(device)
         model = model
-        
+        print(targets[0])
         if train:
             model_args = [video_inputs, video_input_lengths,\
                           audio_inputs, audio_input_lengths,\
@@ -67,9 +67,9 @@ def train(config, model, dataloader, optimizer, criterion, metric, vocab,
         
         with torch.cuda.amp.autocast():
             outputs = model(*model_args)
-        
         loss_target = targets[:, 1:]
-        loss = criterion(outputs, loss_target, target_lengths)
+        #loss = criterion(outputs, loss_target, target_lengths)
+        loss = torch.tensor(0)
         cer = metric(loss_target, outputs)
         cers.append(cer) # add cer on this epoch
         
@@ -170,7 +170,7 @@ def main(config):
     for epoch in range(start_epoch, config.train.num_epochs):
         #######################################           Train             ###############################################
         train_loss, train_cer = train(config, model, train_loader, optimizer, criterion, train_metric, vocab,
-                                         train_begin_time, epoch, summary, device, train=True)
+                                         train_begin_time, epoch, summary, device, train=False)
         
         tr_sentences = 'Epoch %d Training Loss %0.4f CER %0.5f '% (epoch+1, train_loss, train_cer)
         
@@ -191,7 +191,7 @@ def main(config):
 #
 #        print(val_sentences)
 #        train_metric.reset()
-        
+
         Checkpoint(model, optimizer, epoch+1, config=config).save()
 
 
