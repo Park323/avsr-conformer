@@ -18,8 +18,9 @@ class Metric:
     
     def __call__(self, outputs, output_lengths, targets, target_lengths, show=False):
         predicted = torch.argmax(outputs, dim=-1)
-        y_hats = [output[:output_lengths[i].item()] for i, output in enumerate(predicted)]
-        targets = [target[:target_lengths[i].item()] for i, target in enumerate(targets)]
+#        y_hats = [output[:output_lengths[i].item()] for i, output in enumerate(predicted)]
+#        targets = [target[:target_lengths[i].item()] for i, target in enumerate(targets)]
+        y_hats = predicted
         return self.metric(targets, y_hats, show)
 
 class ErrorRate(object):
@@ -33,7 +34,7 @@ class ErrorRate(object):
         self.total_dist = 0.0
         self.total_length = 0.0
         self.vocab = vocab
-        self.use_jaso = True
+        self.use_jaso = False
         self.converter = convert_to_char if self.use_jaso else lambda x: x
 
     def reset(self):
@@ -61,15 +62,23 @@ class ErrorRate(object):
         total_length = 0
 
         for (target, y_hat) in zip(targets, y_hats):
-            s1 = self.vocab.label_to_string(target, tolist=self.use_jaso)
-            s2 = self.vocab.label_to_string(y_hat, tolist=self.use_jaso)
-            s1 = self.converter(s1)
-            s2 = self.converter(s2)
+            s1 = self.vocab.label_to_string(target)
+            s2 = self.vocab.label_to_string(y_hat)
+#            s1 = self.vocab.label_to_string(target, tolist=self.use_jaso)
+#            s2 = self.vocab.label_to_string(y_hat, tolist=self.use_jaso)
+#            s1 = self.converter(s1)
+#            s2 = self.converter(s2)
             if show:
                 print('======================')
                 print("Tar: ", s1)
                 print("Out: ",s2)
                 print('======================')
+            else:
+                with open('log.txt', 'a') as f:
+                    f.write(f"Tar: {s1}\n")
+                    f.write(f"Out: {s2}\n")
+                    f.write(f"=========\n")
+                
             dist, length = self.metric(s1, s2)
 
             total_dist += dist

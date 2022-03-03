@@ -158,7 +158,7 @@ def train(config):
     for epoch in range(start_epoch, config.train.num_epochs):
         data = train_loader if epoch else train_loader_0
         
-        train_loss, train_cer = train_on_epoch(config, model, train_loader, 
+        train_loss, train_cer = train_on_epoch(config, model, data, 
                                                optimizer, scheduler, criterion, train_metric, vocab,
                                                train_begin_time, epoch, summary, device)
         

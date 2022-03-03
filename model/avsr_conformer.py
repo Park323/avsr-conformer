@@ -68,7 +68,7 @@ class BaseConformer(nn.Module):
         targets = F.one_hot(targets, num_classes = self.vocab_size)
         targets = self.target_embedding(targets.to(torch.float32))
         
-        att_out = self.decoder(targets, features)
+        att_out = self.decoder(targets, features, pad_id=self.pad_id)
         att_out = self.ceLinear(att_out)
         att_out = F.log_softmax(att_out, dim=-1)
         
@@ -529,13 +529,13 @@ class TransformerDecoder(nn.Module):
         
     def forward(self, labels, inputs, pad_id=None):
         label_mask = nn.Transformer.generate_square_subsequent_mask(labels.shape[1]).to(inputs.device)
-        # label_pad_mask = self.get_attn_pad_mask(torch.argmax(labels, dim=-1), pad_id)
+        label_pad_mask = self.get_attn_pad_mask(torch.argmax(labels, dim=-1), pad_id)
         
         labels = labels.permute(1,0,2)
         inputs = inputs.permute(1,0,2)
         outputs = self.decoder(labels, inputs, 
-                               tgt_mask=label_mask,)
-                               #tgt_key_padding_mask=label_pad_mask)
+                               tgt_mask=label_mask,
+                               tgt_key_padding_mask=label_pad_mask)
         outputs = outputs.permute(1,0,2)
         return outputs
         

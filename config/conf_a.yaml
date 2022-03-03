@@ -1,7 +1,7 @@
 train:
     ### GPU / WORKERS / SEED #####
     seed : 1023
-    multi_gpu : False
+    multi_gpu : True
     num_workers : 3
 
     ### DATASET ###
@@ -17,7 +17,7 @@ train:
 
     ### TRAIN ###
     num_epochs : 200
-    batch_size : 3
+    batch_size : 12
     learning_rate : 0.0001
 
 
@@ -46,7 +46,7 @@ model :
     feature: logmelspectrogram
     use_npy: False
     split_balance : 0.1
-    max_len  : 350
+    max_len  : 120
 
     # Train
     label_smoothing: 0.1
@@ -70,7 +70,6 @@ decoder:
     dropout_p: 0.3
     n_layers : 6
 
-    attn_mechanism: dot
     method : att_only
     use_beam: False
     beam_width : 1
