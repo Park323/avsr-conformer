@@ -41,6 +41,7 @@ def train_on_epoch(config, model, dataloader, optimizer, scheduler, criterion, m
     timestep = 0
     begin_time = epoch_begin_time = time.time()
     
+    model.train()
     progress_bar = tqdm(enumerate(dataloader),ncols=110)
     for i, (video_inputs,audio_inputs,targets,video_input_lengths,audio_input_lengths,target_lengths) in progress_bar:
         
@@ -60,7 +61,7 @@ def train_on_epoch(config, model, dataloader, optimizer, scheduler, criterion, m
             outputs, output_lengths = model(*model_args)
         
         # drop final_token from outputs & drop sos_token from targets
-        loss_outputs = outputs[0][:,:-1,:] if isinstance(outputs, tuple) else outputs[:,:-1,:]
+        loss_outputs = outputs[0][:,:-1] if isinstance(outputs, tuple) else outputs[:,:-1]
         # Except SOS
         loss_target = targets[:, 1:]
         

@@ -176,7 +176,6 @@ class Conv2dSubampling(nn.Module):
         )
 
     def forward(self, inputs: Tensor, input_lengths: Tensor) -> Tuple[Tensor, Tensor]:
-        pdb.set_trace()
         outputs = self.sequential(inputs.unsqueeze(1))
         batch_size, channels, subsampled_lengths, sumsampled_dim = outputs.size()
 

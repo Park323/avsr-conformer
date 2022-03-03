@@ -80,16 +80,17 @@ class BaseConformer(nn.Module):
    
     def checkLengths(self, outputs):
         # get length of outputs
-        max_len = min(self.config.model.max_len, outputs.size(1))
-        output_idxs = torch.argmax(outputs, dim=-1)
-        ended = torch.zeros(outputs.size(0)).to(outputs.device).to(bool)
-        output_lengths = torch.ones(outputs.size(0)).to(outputs.device).to(int) * max_len
-        for idx in range(outputs.size(1)):
-            is_eos = output_idxs[:,idx] == self.eos_id
-            output_lengths[is_eos*(~ended)] = idx
-            ended[is_eos] = True
-            if not max_len in output_lengths:
-                break
+        with torch.no_grad():
+            max_len = min(self.config.model.max_len, outputs.size(1))
+            output_idxs = torch.argmax(outputs, dim=-1)
+            ended = torch.zeros(outputs.size(0)).to(outputs.device).to(bool)
+            output_lengths = torch.ones(outputs.size(0)).to(outputs.device).to(int) * max_len
+            for idx in range(outputs.size(1)):
+                is_eos = output_idxs[:,idx] == self.eos_id
+                output_lengths[is_eos*(~ended)] = idx
+                ended[is_eos] = True
+                if not max_len in output_lengths:
+                    break
         return output_lengths
             
     def greedySearch(self, features, *args, **kwargs):
@@ -477,25 +478,30 @@ class AudioFrontEnd(nn.Module):
     '''
     def __init__(self, config):
         super().__init__()
-        self.conv1 = nn.Sequential(
+        self.forwards = nn.Sequential(
             nn.Conv1d(config.audio.n_channels, 64, kernel_size=79, stride=3, padding=39), # 80 : 5ms
             nn.BatchNorm1d(64),
             nn.ReLU(),
+            get_residual_layer(2, 64, 64, 3, identity=True),
+            get_residual_layer(2, 64, 128, 3),
+            get_residual_layer(2, 128, 256, 3),
+            get_residual_layer(2, 256, config.encoder.d_model, 3),
+            nn.AvgPool1d(21, 10, padding=10)
         )
-        self.conv2 = get_residual_layer(2, 64, 64, 3, identity=True)
-        self.conv3 = get_residual_layer(2, 64, 128, 3)
-        self.conv4 = get_residual_layer(2, 128, 256, 3)
-        self.conv5 = get_residual_layer(2, 256, config.encoder.d_model, 3)
-        #self.avg_pool = nn.AvgPool1d(21, 20, padding=10) # -> 30fps
-        self.avg_pool = nn.AvgPool1d(21, 10, padding=10) # -> 60fps
+#        self.conv1 = nn.Sequential(
+#            nn.Conv1d(config.audio.n_channels, 64, kernel_size=79, stride=3, padding=39), # 80 : 5ms
+#            nn.BatchNorm1d(64),
+#            nn.ReLU(),
+#        )
+#        self.conv2 = get_residual_layer(2, 64, 64, 3, identity=True)
+#        self.conv3 = get_residual_layer(2, 64, 128, 3)
+#        self.conv4 = get_residual_layer(2, 128, 256, 3)
+#        self.conv5 = get_residual_layer(2, 256, config.encoder.d_model, 3)
+#        #self.avg_pool = nn.AvgPool1d(21, 20, padding=10) # -> 30fps
+#        self.avg_pool = nn.AvgPool1d(21, 10, padding=10) # -> 60fps
         
     def forward(self, inputs):
-        outputs = self.conv1(inputs)
-        outputs = self.conv2(outputs)
-        outputs = self.conv3(outputs)
-        outputs = self.conv4(outputs)
-        outputs = self.conv5(outputs)
-        outputs = self.avg_pool(outputs)
+        outputs = self.forwards(inputs)
         return outputs
 
 class AudioBackEnd(nn.Module):
@@ -510,6 +516,7 @@ class AudioBackEnd(nn.Module):
                                           input_dropout_p=config.encoder.dropout_p)
         
     def forward(self, inputs, input_lengths):
+#        outputs, _ = self.conformer(inputs, input_lengths)
         outputs = inputs
         for i, layer in enumerate(self.conformer.layers):
             outputs = layer(outputs)
@@ -529,7 +536,7 @@ class TransformerDecoder(nn.Module):
         
     def forward(self, labels, inputs, pad_id=None):
         label_mask = nn.Transformer.generate_square_subsequent_mask(labels.shape[1]).to(inputs.device)
-        label_pad_mask = self.get_attn_pad_mask(torch.argmax(labels, dim=-1), pad_id)
+        label_pad_mask = self.get_attn_pad_mask(torch.argmax(labels, dim=-1), pad_id) if pad_id else None
         
         labels = labels.permute(1,0,2)
         inputs = inputs.permute(1,0,2)

@@ -2,7 +2,7 @@ train:
     ### GPU / WORKERS / SEED #####
     seed : 1023
     multi_gpu : True
-    num_workers : 3
+    num_workers : 4
 
     ### DATASET ###
     transcripts_path_train : 'dataset/Train.txt'
