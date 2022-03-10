@@ -1,38 +1,27 @@
 import Levenshtein as Lev
 from metric.wer_utils import Code, EditDistance, Token
 import pdb
+import os
 
-# def get_metric(config, vocab):
-#     if config.model.name == 'las':
-#         metric = lambda targets, outputs : cer(targets, outputs, vocab)
-#     elif config.model.name in ['conf', 'conf_a']:
-#         idx = 0 if config.model.use_att else 1
-#         metric = lambda targets, outputs : cer(targets, outputs[idx], vocab)
-#     return metric
+from dataloader.vocabulary import convert_to_char
 
 def get_metric(config, vocab):
-    if config.model.name == 'las':
-        use_idx = -1
-    elif config.model.name in ['conf', 'conf_a']:
-        use_idx = 0 if config.model.use_att else 1
-    return Metric(vocab, use_idx=use_idx)
+    return Metric(vocab, config)
 
 class Metric:
-    def __init__(self, vocab, use_idx=-1):
+    def __init__(self, vocab, config):
         super().__init__()
-        self.metric = CharacterErrorRate(vocab)
-        self.use_idx = use_idx
+        self.metric = CharacterErrorRate(vocab, config)
         
     def reset(self):
         self.metric.reset()
     
-    def __call__(self, targets, outputs):
-#        if self.use_idx != -1:
-#            outputs = outputs[self.use_idx]
-        # if self.use_idx == 0:
-        #     outputs = outputs
+    def __call__(self, targets, outputs, target_lengths=None, output_lengths=None, show=False):
         y_hats = outputs.max(-1)[1]
-        return self.metric(targets, y_hats)
+        if target_lengths:
+            y_hats = [output[:output_lengths[i].item()] for i, output in enumerate(y_hats)]
+            targets = [target[:target_lengths[i].item()] for i, target in enumerate(targets)]
+        return self.metric(targets, y_hats, show=show)
 
 class ErrorRate(object):
     """
@@ -41,23 +30,24 @@ class ErrorRate(object):
         Do not use this class directly, use one of the sub classes.
     """
 
-    def __init__(self, vocab) :
+    def __init__(self, vocab, config) :
         self.total_dist = 0.0
         self.total_length = 0.0
         self.vocab = vocab
+        self.config = config
 
     def reset(self):
         self.total_dist = 0.0
         self.total_length = 0.0
 
-    def __call__(self, targets, y_hats):
+    def __call__(self, targets, y_hats, show=False):
         """ Calculating character error rate """
-        dist, length = self._get_distance(targets, y_hats)
+        dist, length = self._get_distance(targets, y_hats, show=show)
         self.total_dist += dist
         self.total_length += length
         return self.total_dist / self.total_length
 
-    def _get_distance(self, targets, y_hats):
+    def _get_distance(self, targets, y_hats, show=False):
         """
         Provides total character distance between targets & y_hats
         Args:
@@ -71,14 +61,30 @@ class ErrorRate(object):
         total_length = 0
 
         for (target, y_hat) in zip(targets, y_hats):
-            s1 = self.vocab.label_to_string(target)
-            s2 = self.vocab.label_to_string(y_hat)
-            with open('log2.txt', 'a') as f:
-                f.write('======================\n')
-                f.write(f"Tar: {s1}\n")
-                f.write(f"Out: {s2}\n")
-                f.write('======================\n')
-            
+            if self.config.model.use_jaso:
+                s1 = self.vocab.label_to_string(target, tolist=True)
+                s2 = self.vocab.label_to_string(y_hat, tolist=True)
+                s1 = convert_to_char(s1)
+                s2 = convert_to_char(s2)
+            else:
+                s1 = self.vocab.label_to_string(target)
+                s2 = self.vocab.label_to_string(y_hat)
+                
+            # Print Results
+            if show:
+                print(f"Tar: {s1}")
+                print(f"Out: {s2}")
+                print('==========')
+            # Record Results
+            else:
+                save_folder = f'outputs/metric_log'
+                if not os.path.exists(save_folder):
+                    os.makedirs(save_folder)
+                with open(f'{save_folder}/{self.config.train.exp_day}.txt', 'a') as f:
+                    f.write(f"Tar: {s1}\n")
+                    f.write(f"Out: {s2}\n")
+                    f.write('==========\n')
+                
             dist, length = self.metric(s1, s2)
 
             total_dist += dist
@@ -92,8 +98,8 @@ class ErrorRate(object):
 
 class CharacterErrorRate(ErrorRate):
     
-    def __init__(self, vocab):
-        super(CharacterErrorRate, self).__init__(vocab)
+    def __init__(self, vocab, config):
+        super(CharacterErrorRate, self).__init__(vocab, config)
 
     def metric(self, s1: str, s2: str):
         

@@ -1,9 +1,8 @@
 train:
     ### GPU / WORKERS / SEED #####
     seed : 1023
-    multi_gpu : True
-    gpu : 1
-    num_workers : 2
+    multi_gpu : False
+    num_workers : 4
 
     ### DATASET ###
     transcripts_path_train : 'dataset/Train.txt'
@@ -14,12 +13,20 @@ train:
     ### STATUS ###
     checkpoint_every : 500  #train 중간마다 저장
     print_every : 5        #iteration 출력 업데이트 주기
-    exp_day : 'av'
+    exp_day : 'att_av'
 
     ### TRAIN ###
-    num_epochs : 100
+    num_epochs : 30
     batch_size : 1
+    scheduler : 'on'
     learning_rate : 0.0001
+
+
+video:
+    use_vid: True
+    use_npz: False
+    use_raw_vid: 'off'
+    n_channels : 3
 
     
 audio:
@@ -38,26 +45,20 @@ audio:
     n_channels : 1
 
 
-
-video:
-    n_channels : 3
-
-
-
 model : 
     ## My Model config ##
     name : conf
     feature: logmelspectrogram
     use_npy: False
     split_balance : 0.1
-    max_len  : 150
     
-    # Train
-    label_smoothing: 0.1
-    alpha : 0.5
+    ## Language Model
+    use_jaso : False
+    max_len  : 120
 
-    # Metric
-    use_att : True
+    # Train
+    label_smoothing: 0.0
+    alpha : 0.1 # attention rate
     
 
 encoder:
@@ -66,8 +67,6 @@ encoder:
     n_head : 8
     n_layers: 6
     dropout_p: 0.1
-    encoder_bidirectional: True
-    encoder_rnn_type: LSTM
     mask_conv: False
 
 
@@ -78,9 +77,7 @@ decoder:
     ff_dim   : 512
     dropout_p: 0.3
     n_layers : 6
-    vocab_size : 1159
 
-    decoder_attn_mechanism: dot
-    decoder_rnn_type: LSTM
-    decoder_bidirectional: False
-    decoder_use_beam: False
+    method : att_only
+    use_beam: False
+    beam_width : 1

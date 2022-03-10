@@ -1,9 +1,8 @@
 train:
     ### GPU / WORKERS / SEED #####
     seed : 1023
-    multi_gpu : True
-    gpu : 1
-    num_workers : 2
+    multi_gpu : False
+    num_workers : 4
 
     ### DATASET ###
     transcripts_path_train : 'dataset/Train.txt'
@@ -14,12 +13,19 @@ train:
     ### STATUS ###
     checkpoint_every : 500  #train 중간마다 저장
     print_every : 5        #iteration 출력 업데이트 주기
-    exp_day : 'old1'
+    exp_day : 'ctc_js2'
 
     ### TRAIN ###
-    num_epochs : 30
-    batch_size : 4
-    learning_rate : 0.0001
+    num_epochs : 100
+    batch_size : 1
+    scheduler : 'off'
+    learning_rate : 0.00001
+
+
+video:
+    use_vid: False
+    use_npz: False
+    use_raw_vid: 'off'
 
     
 audio:
@@ -37,20 +43,21 @@ audio:
     freq_mask_num : 2
     n_channels : 1
 
+
 model : 
     ## My Model config ##
     name : conf_a
     feature: logmelspectrogram
     use_npy: False
     split_balance : 0.1
-    max_len  : 150
+    
+    ## Language Model
+    use_jaso : True
+    max_len  : 350
 
     # Train
-    label_smoothing: 0.1
-    alpha : 0.5
-
-    # Metric
-    use_att : True
+    label_smoothing: 0.0
+    alpha : 0.1 # attention rate
     
 
 encoder:
@@ -59,10 +66,16 @@ encoder:
     n_head : 8
     n_layers: 6
     dropout_p: 0.1
-    encoder_bidirectional: True
-    encoder_rnn_type: LSTM
     mask_conv: False
-
+    fps: 60
+    audio : 
+        channel_0 : 64
+        channel_1 : 128
+        channel_2 : 256
+        kernel_size : 79
+        stride : 3
+        # 80 : 5ms
+        # 800 : 50ms
 
 decoder:
     # Decoder
@@ -71,9 +84,7 @@ decoder:
     ff_dim   : 512
     dropout_p: 0.3
     n_layers : 6
-    vocab_size : 1159
 
-    decoder_attn_mechanism: dot
-    decoder_rnn_type: LSTM
-    decoder_bidirectional: False
-    decoder_use_beam: False
+    method : ctc_only
+    use_beam: False
+    beam_width : 1

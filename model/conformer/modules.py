@@ -16,7 +16,7 @@ import torch
 import torch.nn as nn
 import torch.nn.init as init
 from torch import Tensor
-
+import pdb
 
 class ResidualConnectionModule(nn.Module):
     """
@@ -46,7 +46,8 @@ class Linear(nn.Module):
             init.zeros_(self.linear.bias)
 
     def forward(self, x: Tensor) -> Tensor:
-        return self.linear(x)
+        y = self.linear(x)
+        return y
 
 
 class View(nn.Module):

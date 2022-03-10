@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import math
+import math, pdb
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -89,7 +89,18 @@ class RelativeMultiHeadAttention(nn.Module):
         pos_score = self._relative_shift(pos_score)
 
         score = (content_score + pos_score) / self.sqrt_dim
+        ## Debug
+#        print('Content Score')
+#        print(content_score)
+#        print('Position Score')
+#        print(pos_score)
+#        print('Score')
+#        print(score)
 
+        #print(score.max())
+        if score[~torch.isfinite(score)].sum():
+            pdb.set_trace()
+            
         if mask is not None:
             mask = mask.unsqueeze(1)
             score.masked_fill_(mask, -1e9)
@@ -144,7 +155,6 @@ class MultiHeadedSelfAttentionModule(nn.Module):
         batch_size, seq_length, _ = inputs.size()
         pos_embedding = self.positional_encoding(seq_length)
         pos_embedding = pos_embedding.repeat(batch_size, 1, 1)
-
         inputs = self.layer_norm(inputs)
         outputs = self.attention(inputs, inputs, inputs, pos_embedding=pos_embedding, mask=mask)
 

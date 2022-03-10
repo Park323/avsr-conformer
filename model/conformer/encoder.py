@@ -105,8 +105,14 @@ class ConformerBlock(nn.Module):
             ),
             nn.LayerNorm(encoder_dim),
         )
-
+        
     def forward(self, inputs: Tensor) -> Tensor:
+#        outputs = inputs
+#        for i, layer in enumerate(self.sequential):
+#            outputs = layer(outputs)
+#            print(i)
+#            print(outputs.max())
+#        return outputs
         return self.sequential(inputs)
 
 
