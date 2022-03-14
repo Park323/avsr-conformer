@@ -72,9 +72,6 @@ def train(config, model, dataloader, optimizer, scheduler, criterion, metric, vo
     timestep = 0
     begin_time = epoch_begin_time = time.time() #모델 학습 시작 시간
 
-    print("Initial GPU Usage")  
-    gpu_usage()
-    
     model.train()
     progress_bar = tqdm(enumerate(dataloader),ncols=110)
     for i, (video_inputs,audio_inputs,targets,video_input_lengths,audio_input_lengths,target_lengths) in progress_bar:
@@ -95,9 +92,6 @@ def train(config, model, dataloader, optimizer, scheduler, criterion, metric, vo
                       targets, target_lengths]
         
         outputs = model(*model_args)
-        
-        #with torch.cuda.amp.autocast():
-        #    outputs = model(*model_args)
             
         loss_target = targets[:, 1:]
         if config.decoder.method=='att_only':
@@ -111,14 +105,13 @@ def train(config, model, dataloader, optimizer, scheduler, criterion, metric, vo
             metric_outputs = outputs[0]
         loss = criterion(loss_outputs, loss_target, target_lengths)
         
-        cer = metric(loss_target, metric_outputs)
+        cer = metric(loss_target, metric_outputs, show=False)
         cers.append(cer) # add cer on this epoch
         
         loss.backward()
         optimizer.step()
 
         total_num += 1
-        # total_num += outputs.size(0) * outputs.size(1)
         epoch_loss_total += loss.item()
 
         timestep += 1
@@ -136,9 +129,6 @@ def train(config, model, dataloader, optimizer, scheduler, criterion, metric, vo
                 optimizer.state_dict()['param_groups'][0]['lr'])
             )
             begin_time = time.time()
-            
-            # print()
-            # gpu_usage()
             
         summary.add_scalar('iter_training/loss',loss,epoch*len(dataloader)+i)
         summary.add_scalar('iter_training/cer',cer,epoch*len(dataloader)+i)
@@ -190,9 +180,9 @@ def main(config):
             model = nn.DataParallel(model)
         model = model.to(device)
         print(f'Loaded train logs, start from {resume_checkpoint.epoch+1} epoch')
-        #model.config = config
-        #optimizer = torch.optim.Adam(model.parameters(), lr=config.train.learning_rate)
-        #scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, patience=5)
+        model.config = config
+        optimizer = torch.optim.Adam(model.parameters(), lr=config.train.learning_rate)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, patience=5)
     
     criterion = get_criterion(config, vocab)
     train_metric = get_metric(config, vocab)
@@ -212,6 +202,8 @@ def main(config):
     print(f'trainset : {len(trainset)}, {len(train_loader)} batches')
     
     train_begin_time = time.time()
+    print("Initial GPU Usage")  
+    gpu_usage()
     print('Train start')
     for epoch in range(start_epoch, config.train.num_epochs):
     
@@ -232,14 +224,16 @@ def main(config):
 
 def test(config):
     # Configuration
+    ## 자소
     if config.model.use_jaso:
         config.train.transcripts_path_train = config.train.transcripts_path_train.replace('.txt','_js.txt')
         config.train.transcripts_path_valid = config.train.transcripts_path_valid.replace('.txt','_js.txt')
         config.train.vocab_label = config.train.vocab_label.replace('.csv','_js.csv')
-        
+    
     vocab = KsponSpeechVocabulary(config.train.vocab_label)
 
     model = torch.load(config.model.model_path, map_location=lambda storage, loc: storage).to(device)
+    model.config.model.max_len = config.model.max_len # 
     model.eval()
     
     criterion = Attention_Loss(config, vocab)
@@ -279,8 +273,6 @@ def test(config):
                           audio_inputs, audio_input_lengths,]
                           
             outputs, output_lengths = model(*model_args)
-#            for i in range(y_hats.size(0)):
-#                submission.append(vocab.label_to_string(y_hats[i].cpu().detach().numpy()))
 
             # drop final_token from outputs & drop sos_token from targets
             loss_outputs = outputs[:,:-1,:]
@@ -314,7 +306,7 @@ def get_args():
     parser.add_argument('-m','--model',
                         required=True, help='Select Model')
     parser.add_argument('--mode', default='train', help='Select Mode')
-    parser.add_argument('--model_path',
+    parser.add_argument('-mp', '--model_path',
                         required=False, help='Model Path')
     args = parser.parse_args()
     return args

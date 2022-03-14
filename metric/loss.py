@@ -35,7 +35,7 @@ class CTC_Attention_Loss(nn.Module):
         att_out = outputs[0].contiguous().view(-1,outputs[0].shape[-1]) 
         ctc_out = outputs[1].contiguous().permute(1,0,2) # (B,L,E)->(L,B,E)
         att_loss = self.att(att_out, targets.contiguous().view(-1))
-        ctc_loss = self.ctc(ctc_out, targets, # ctc_out.size(0), targets.size(1),
+        ctc_loss = self.ctc(ctc_out, targets,
                             (torch.ones(ctc_out.shape[1])*ctc_out.shape[0]).to(torch.int),
                             target_lengths) 
         return a*att_loss + (1-a)*ctc_loss
@@ -85,5 +85,4 @@ class LabelSmoothingLoss(nn.Module):
             label_smoothed.fill_(self.smoothing / (self.vocab_size - 1))
             label_smoothed.scatter_(1, target.data.unsqueeze(1), self.confidence)
             label_smoothed[target == self.ignore_index, :] = 0
-        # return torch.sum(-label_smoothed * logit)
         return torch.mean(torch.sum(-label_smoothed * logit, axis=-1))

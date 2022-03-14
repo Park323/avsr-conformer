@@ -4,6 +4,7 @@ import random
 from tqdm import tqdm
 import glob
 import pandas as pd
+import numpy as np
 import pdb
 import argparse
 
@@ -14,7 +15,6 @@ def load_label(filepath, encoding='utf-8'):
     id2char = dict()
 
     ch_labels = pd.read_csv(filepath, encoding=encoding)
-
     id_list = ch_labels["id"]
     char_list = ch_labels["char"]
     #freq_list = ch_labels.get("freq", id_list)
@@ -33,6 +33,7 @@ def sentence_to_target(sentence, char2id):
         try:
             target += (str(char2id[ch]) + ' ')
         except KeyError:
+            print(f"KeyError Occured, Key : '{ch}'")
             continue
 
     return target[:-1]
@@ -56,18 +57,55 @@ def generate_character_script(videos_paths, audios_paths, transcripts, test=Fals
         char2id, id2char = load_label("./dataset/labels.csv")
         char2id_jaso, _ = load_label("./dataset/labels_js.csv")
     
-        dataset = list(zip(videos_paths, audios_paths, transcripts))
         
-        ### Train/Valid Split ###
-        random.shuffle(dataset)
-        val_num = int(valid_rate*len(dataset))
-        trainsets = dataset[:-val_num]
-        valsets = dataset[-val_num:]
-    
+        ####### Train/Valid Split #######
+        val_num = int(valid_rate*len(transcripts))
+        
+        # Check Repeatancy
+        redundant_indices = {}
+        for i in range(len(transcripts)):
+            if transcripts[i] in redundant_indices.keys():
+                redundant_indices[transcripts[i]].add(i)
+            else:
+                redundant_indices[transcripts[i]] = set([i])
+
+        train_videos_paths, train_audios_paths, train_transcripts = list(), list(), list()
+        valid_videos_paths, valid_audios_paths, valid_transcripts = list(), list(), list()
+        
+        while len(valid_transcripts) < val_num:
+            sntn = np.random.choice(list(redundant_indices.keys()))
+            indices = redundant_indices.pop(sntn)
+            for idx in indices:
+                valid_videos_paths.append(videos_paths[idx])
+                valid_audios_paths.append(audios_paths[idx])
+                valid_transcripts.append(transcripts[idx])
+        print(f'val num : {len(valid_transcripts)}')
+        
+        while redundant_indices:
+            sntn = list(redundant_indices.keys())[0]
+            indices = redundant_indices.pop(sntn)
+            for idx in indices:
+                train_videos_paths.append(videos_paths[idx])
+                train_audios_paths.append(audios_paths[idx])
+                train_transcripts.append(transcripts[idx])
+        print(f'train num : {len(train_transcripts)}')
+                
+        trainsets = list(zip(train_videos_paths, train_audios_paths, train_transcripts))
+        valsets = list(zip(valid_videos_paths, valid_audios_paths, valid_transcripts))
+        
+#        # Simple mEthod
+#        dataset = list(zip(videos_paths, audios_paths, transcripts))
+#        random.shuffle(dataset)
+#        trainsets = dataset[:-val_num]
+#        valsets = dataset[-val_num:]
+
+        ####### Split End #########
+
         ### Sort Train Set by the length of transcripts ###
         trainsets = sorted(trainsets, key=lambda x: len(x[2]))
         
         for mode, tmp in zip(['Train', 'Valid'],[trainsets, valsets]):
+            # mode = 'debug'+mode
             f1 = open(os.path.join('./dataset/'+mode+".txt"), "w")
             f2 = open(os.path.join('./dataset/'+mode+"_js.txt"), "w")
             

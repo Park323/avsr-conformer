@@ -97,49 +97,6 @@ class BaseConformer(nn.Module):
         preds = F.log_softmax(preds, dim=-1)
         
         return preds, pred_lengths
-#        max_len = self.config.model.max_len
-#        preds = torch.full((features.size(0), max_len+1), 0, dtype=int, device=features.device)
-#        pred_lengths = torch.full((features.size(0),), 0, dtype=int, device=features.device)
-#        active_batch = torch.full((features.size(0),), True, dtype=bool, device=features.device)
-#        ctc_outputs = F.softmax(self.ctcLinear(features), dim=-1)
-#        
-#        Y_n = [{t:{(1,) : torch.tensor(0)} for t in range(features.size(1))} 
-#               for i in range(features.size(0))]
-#        Y_b = [{t:{(1,) : self.pi_sos(t, ctc_outputs[i])} for t in range(features.size(1))}
-#               for i in range(features.size(0))]
-#                  
-#        loop_idx = 0
-#        while loop_idx <= max_len and loop_idx < ctc_outputs.size(1):
-#            # End the loop
-#            if active_batch.sum()==0:
-#                break 
-#            # Fill sos_id
-#            elif loop_idx == 0:
-#                preds[:,loop_idx] = 1
-#            # if unfinished batch exists
-#            else:
-#                ### CTC
-#                ctc_scores = torch.zeros_like(att_scores)
-#                candidate_idxs = range(self.vocab_size)
-#                for i, g in enumerate(preds[active_batch, :loop_idx]):
-#                    for c in candidate_idxs:
-#                        h = torch.cat([g,torch.tensor([c], device=g.device)])
-#                        ctc_scores[i, c] = self.get_ctc_score(tuple(h.tolist()), ctc_outputs[i], Y_n[i], Y_b[i])
-#                
-#                ### Find the Best
-#                topk_ids = ctc_scores.topk(k=1, dim=-1).indices[:,0]
-#                
-#                preds[active_batch, loop_idx] = topk_ids
-#                
-#                pred_lengths[active_batch] += 1
-#                active_batch[preds[:, loop_idx] == 2] = False
-#                
-#            loop_idx += 1
-#        
-#        preds = F.one_hot(preds[:,1:], self.vocab_size).to(float)
-#        preds = F.log_softmax(preds, dim=-1)
-#        
-#        return preds, pred_lengths
 
     def greedyAttentionSearch(self, features, *args, **kwargs):
         max_len = self.config.model.max_len

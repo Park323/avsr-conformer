@@ -18,7 +18,7 @@ class Metric:
     
     def __call__(self, targets, outputs, target_lengths=None, output_lengths=None, show=False):
         y_hats = outputs.max(-1)[1]
-        if target_lengths:
+        if target_lengths is not None:
             y_hats = [output[:output_lengths[i].item()] for i, output in enumerate(y_hats)]
             targets = [target[:target_lengths[i].item()] for i, target in enumerate(targets)]
         return self.metric(targets, y_hats, show=show)
@@ -61,7 +61,9 @@ class ErrorRate(object):
         total_length = 0
 
         for (target, y_hat) in zip(targets, y_hats):
+            #pdb.set_trace()
             if self.config.model.use_jaso:
+            #if False:
                 s1 = self.vocab.label_to_string(target, tolist=True)
                 s2 = self.vocab.label_to_string(y_hat, tolist=True)
                 s1 = convert_to_char(s1)

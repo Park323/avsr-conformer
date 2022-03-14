@@ -17,7 +17,7 @@ CHOSUNG_LIST = ['ㄱ', 'ㄲ', 'ㄴ', 'ㄷ', 'ㄸ', 'ㄹ', 'ㅁ', 'ㅂ', 'ㅃ', '
 JUNGSUNG_LIST = ['ㅏ', 'ㅐ', 'ㅑ', 'ㅒ', 'ㅓ', 'ㅔ', 'ㅕ', 'ㅖ', 'ㅗ', 'ㅘ', 'ㅙ', 'ㅚ', 'ㅛ', 'ㅜ', 'ㅝ', 'ㅞ', 'ㅟ', 'ㅠ', 'ㅡ', 'ㅢ', 'ㅣ']
 
 # 종성 리스트. 00 ~ 27 + 1(1개 없음)
-JONGSUNG_LIST = ['<unk>', 'ㄱ', 'ㄲ', 'ㄳ', 'ㄴ', 'ㄵ', 'ㄶ', 'ㄷ', 'ㄹ', 'ㄺ', 'ㄻ', 'ㄼ', 'ㄽ', 'ㄾ', 'ㄿ', 'ㅀ', 'ㅁ', 'ㅂ', 'ㅄ', 'ㅅ', 'ㅆ', 'ㅇ', 'ㅈ', 'ㅊ', 'ㅋ', 'ㅌ', 'ㅍ', 'ㅎ']
+JONGSUNG_LIST = [None, 'ㄱ', 'ㄲ', 'ㄳ', 'ㄴ', 'ㄵ', 'ㄶ', 'ㄷ', 'ㄹ', 'ㄺ', 'ㄻ', 'ㄼ', 'ㄽ', 'ㄾ', 'ㄿ', 'ㅀ', 'ㅁ', 'ㅂ', 'ㅄ', 'ㅅ', 'ㅆ', 'ㅇ', 'ㅈ', 'ㅊ', 'ㅋ', 'ㅌ', 'ㅍ', 'ㅎ']
 
 
 def char2ord(x):
@@ -39,7 +39,7 @@ def convert_to_JASO(test_keyword):
     result = list()
     for keyword in split_keyword_list:
         # 한글 여부 check 후 분리
-        if re.match('.*[ㄱ-ㅎㅏ-ㅣ가-힣]+.*', keyword) is not None:
+        if re.match('.*[가-힣]+.*', keyword) is not None: # '.*[ㄱ-ㅎㅏ-ㅣ가-힣]+.*'
             char_code = ord(keyword) - BASE_CODE
             char1 = int(char_code / CHOSUNG)
             result.append(CHOSUNG_LIST[char1])
@@ -49,8 +49,9 @@ def convert_to_JASO(test_keyword):
             #print('중성 : {}'.format(JUNGSUNG_LIST[char2]))
             char3 = int((char_code - (CHOSUNG * char1) - (JUNGSUNG * char2)))
             if char3==0:
-                # result.append('<unk>')
-                pass
+                # result.append('<unk>') # att_0
+                result.append('<emp>') # att_1, ctc_2
+                # att_2
             else:
                 result.append(f'#{JONGSUNG_LIST[char3]}')
             #print('종성 : {}'.format(JONGSUNG_LIST[char3]))
@@ -61,17 +62,22 @@ def convert_to_JASO(test_keyword):
 
 
 def convert_to_char(JASOlist):
-    id2KR = {code-BASE_CODE+5:chr(code)
-             for code in range(BASE_CODE, END_CODE + 1)}
+    #id2KR = {code-BASE_CODE+5:chr(code)
+    #         for code in range(BASE_CODE, END_CODE + 1)}
+    id2KR = {code-BASE_CODE+6:chr(code)
+             for code in range(BASE_CODE, END_CODE + 1)} # att_1, ctc_2
     id2KR[0] = '<pad>'
     id2KR[1] = '<sos>'
     id2KR[2] = '<eos>' 
     id2KR[3] = '<unk>'
     id2KR[4] = ' '
+    id2KR[5] = '<emp>' # att_1, ctc_2
+    # 6 ~ ... => 가 ~ .. 힣
     KR2id = {key:value for value, key in id2KR.items()}
     
     def reset_count():
-        return 0, 5
+        # return 0, 5 # att_0
+        return 0, 6 # att_1, ctc_2
     
     result = list()
     chr_count, chr_id = reset_count()
@@ -88,7 +94,7 @@ def convert_to_char(JASOlist):
             result.append(JS)
             continue
                         
-        JS = JS[1:] if JS[0]=='#' else JS
+        JS = JS.replace('#', '')
         
         if JS in lists[chr_count]:
             chr_id += lists[chr_count].index(JS) * nums[chr_count]
@@ -151,8 +157,10 @@ class KsponSpeechVocabulary(Vocabulary):
             for label in labels:
                 if label.item() == self.eos_id:
                     break
-                elif label.item() == self.unk_id:
-                  continue
+                #elif label.item() == self.unk_id:
+                elif label.item() == self.unk_id or label.item()==int(self.vocab_dict['<emp>']): # att_1, ctc_2
+                    #print(label.item()) # att_1, ctc_2
+                    continue
                 if tolist:
                     sentence.append(self.id_dict[label.item()])
                 else:
@@ -165,8 +173,10 @@ class KsponSpeechVocabulary(Vocabulary):
             for label in batch:
                 if label.item() == self.eos_id:
                     break
-                elif label.item() == self.unk_id:
-                  continue
+                #elif label.item() == self.unk_id:
+                elif label.item() == self.unk_id or label.item()==int(self.vocab_dict['<emp>']): # att_1, ctc_2
+                    #print(label.item()) # att_1, ctc_2
+                    continue                    
                 if tolist:
                     sentence.append(self.id_dict[label.item()])
                 else:

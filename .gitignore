@@ -114,5 +114,3 @@ dmypy.json
 .pyre/
 outputs/
 data/
-dataset/Test.txt
-dataset/Train.txt

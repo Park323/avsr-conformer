@@ -164,7 +164,7 @@ class AV_Dataset(Dataset):
         video = torch.from_numpy(video).float()
         video -= torch.mean(video)
         video /= torch.std(video)
-        video_feature  = video
+        video_feature  = video if self.config.video.use_raw_vid=='on' else video.permute(1,0)
         return video_feature
 
     def parse_transcript(self, transcript):
@@ -230,9 +230,7 @@ def _collate_fn(batch, config):
         return len(p[2])
     
     # sort by sequence length for rnn.pack_padded_sequence()
-    # pdb.set_trace()
     batch = sorted(batch, key=lambda sample: sample[0].size(0), reverse=True)
-    
     seq_lengths = [len(s[1]) for s in batch]
     target_lengths = [len(s[2]) - 1 for s in batch]
     
@@ -260,7 +258,7 @@ def _collate_fn(batch, config):
     
     seq_lengths = torch.IntTensor(seq_lengths)
     
-    # B T C     --> B C T
+    # B T C  --> B C T
     seqs = seqs.permute(0,2,1)
     
     
@@ -280,6 +278,7 @@ def _collate_fn(batch, config):
             vids = torch.zeros(batch_size, max_vid_size, vid_feat_c)
         
         for x in range(batch_size):
+            sample = batch[x]
             video_ = sample[0]
             vid_length = video_.size(0)
             if raw:
@@ -293,9 +292,6 @@ def _collate_fn(batch, config):
             # B T W H C --> B C T W H
             # pdb.set_trace()
             vids = vids.permute(0,4,1,2,3)
-        else:
-            # B C T --> B T C
-            vids = vids.permute(0,2,1)
 
     else:
         vids = torch.zeros((batch_size, 1))

@@ -7,33 +7,33 @@ train:
     ### DATASET ###
     transcripts_path_train : 'dataset/Train.txt'
     transcripts_path_valid : 'dataset/Valid.txt'
-    noise_path : 'data_folder/Noise'
     vocab_label : 'dataset/labels.csv'
+    noise_path : 'data_folder/Noise'
 
     ### STATUS ###
     checkpoint_every : 500  #train 중간마다 저장
     print_every : 5        #iteration 출력 업데이트 주기
-    exp_day : 'ctc_js2'
+    exp_day : 's2hybrid_1'
 
     ### TRAIN ###
     num_epochs : 100
     batch_size : 1
-    scheduler : 'off'
-    learning_rate : 0.00001
+    scheduler : 'on'
+    learning_rate : 0.0001
 
 
 video:
     use_vid: False
     use_npz: False
-    use_raw_vid: 'off'
-
+    use_raw_vid: 'on'
+    
     
 audio:
     feature_extract_by : 'None'
     transform_method : raw
     sample_rate : 14400
     n_mels : 80
-    frame_length : 20 
+    frame_length : 20
     frame_shift : 10
     normalize : True
     spec_augment : True
@@ -53,11 +53,11 @@ model :
     
     ## Language Model
     use_jaso : True
-    max_len  : 350
+    max_len  : 280
 
     # Train
     label_smoothing: 0.0
-    alpha : 0.1 # attention rate
+    alpha : 0.2 # attention rate
     
 
 encoder:
@@ -67,7 +67,7 @@ encoder:
     n_layers: 6
     dropout_p: 0.1
     mask_conv: False
-    fps: 60
+    fps: 30
     audio : 
         channel_0 : 64
         channel_1 : 128
@@ -83,8 +83,8 @@ decoder:
     n_head   : 8
     ff_dim   : 512
     dropout_p: 0.3
-    n_layers : 6
+    n_layers : 12
 
-    method : ctc_only
+    method : hybrid
     use_beam: False
     beam_width : 1
