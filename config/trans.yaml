@@ -1,8 +1,8 @@
 train:
     ### GPU / WORKERS / SEED #####
     seed : 1023
-    multi_gpu : False
-    num_workers : 4
+    multi_gpu : True
+    num_workers : 2
 
     ### DATASET ###
     transcripts_path_train : 'dataset/Train.txt'
@@ -13,15 +13,15 @@ train:
     ### STATUS ###
     checkpoint_every : 500  #train 중간마다 저장
     print_every : 5        #iteration 출력 업데이트 주기
-    exp_day : 'las_1'
+    exp_day : 'tratt_1v'
 
     ### TRAIN ###
-    num_epochs : 50
-    batch_size : 1
+    num_epochs : 30
+    batch_size : 2
     scheduler : 'on'
-    learning_rate : 0.0001
-    
-    
+    learning_rate : 0.00005
+
+
 video:
     use_vid: False
     use_npz: False
@@ -30,11 +30,11 @@ video:
     
     
 audio:
-    feature_extract_by : 'librosa'
-    transform_method : fbank
-    sample_rate : 16000
+    feature_extract_by : 'None'
+    transform_method : raw
+    sample_rate : 14400
     n_mels : 80
-    frame_length : 20 
+    frame_length : 20
     frame_shift : 10
     normalize : True
     spec_augment : True
@@ -47,40 +47,46 @@ audio:
 
 model : 
     ## My Model config ##
-    name : las
+    name : trans
     feature: logmelspectrogram
     use_npy: False
     split_balance : 0.1
     
     ## Language Model
-    use_jaso : False
-    max_len  : 120
+    use_jaso : True
+    max_len  : 280
 
     # Train
     label_smoothing: 0.0
     alpha : 0.1 # attention rate
-
-
-las_model : 
-    # Train
-    label_smoothing: 0.1
     
-    # Encoder
-    encoder_hidden_dim : 256
-    encoder_bidirectional: True
-    encoder_rnn_type: LSTM
-    num_encoder_layers: 3
-    encoder_dropout_p: 0.1
-    mask_conv: False
 
+encoder:
+    # Encoder
+    method : 'transformer'
+    d_model : 512
+    n_head : 8
+    n_layers: 6
+    dropout_p: 0.1
+    mask_conv: False
+    fps: 30
+    audio : 
+        channel_0 : 64
+        channel_1 : 128
+        channel_2 : 256
+        kernel_size : 79
+        stride : 3
+        # 80 : 5ms
+        # 800 : 50ms
+
+decoder:
     # Decoder
-    decoder_max_length: 150
-    decoder_embedding_dim: 512
-    decoder_hidden_dim: 512
-    decoder_attn_mechanism: dot
-    decoder_num_heads: 4
-    decoder_num_layers: 2
-    decoder_rnn_type: LSTM
-    decoder_dropout_p: 0.3
-    decoder_bidirectional: False
-    decoder_use_beam: False
+    d_model  : 512
+    n_head   : 8
+    ff_dim   : 512
+    dropout_p: 0.3
+    n_layers : 12
+
+    method : att_only
+    use_beam: False
+    beam_width : 1

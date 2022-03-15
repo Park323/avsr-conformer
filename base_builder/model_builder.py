@@ -14,9 +14,9 @@ def build_model(config, vocab):
     model_name = config.model.name
     if model_name=='las':
         model = build_las_model(config, vocab=vocab)
-    elif model_name=='conf':
+    elif model_name in ['conf','trans']:
         model = build_conf_model(config, 'multi', vocab=vocab)
-    elif model_name=='conf_a':
+    elif model_name in ['conf_a','trans_a']:
         model = build_conf_model(config, 'audio', vocab=vocab)
         
     print("model parameter ")

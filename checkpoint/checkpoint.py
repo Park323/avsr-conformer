@@ -51,10 +51,13 @@ class Checkpoint(object):
                        os.path.join(path, pt_path)))
 
         resume_checkpoint = torch.load(os.path.join(path, self.TRAINER_STATE_NAME))
+#        self.model.load_state_dict(
+#            torch.load(os.path.join(path, pt_path))
+#        )
         model = torch.load(os.path.join(path, pt_path))
 
         epoch = n if n else resume_checkpoint['epoch']
-
+        
         return Checkpoint(
             model=model, 
             optimizer=resume_checkpoint['optimizer'],

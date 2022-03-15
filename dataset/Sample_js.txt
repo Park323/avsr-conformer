@@ -1,0 +1,7 @@
+data/Train/Video_pm/08855.npy	data/Train/Audio/08855.wav	우리	17 38 5 11 45 5
+data/Train/Video_pm/05159.npy	data/Train/Audio/05159.wav	우리	17 38 5 11 45 5
+data/Train/Video_pm/02488.npy	data/Train/Audio/02488.wav	않더라	17 25 51 9 29 5 11 25 5
+data/Train/Video_pm/04858.npy	data/Train/Audio/04858.wav	학원 끈	24 25 46 17 39 49 4 7 43 49
+data/Train/Video_pm/00836.npy	data/Train/Audio/00836.wav	이제 알았어	17 45 5 18 30 5 4 17 25 53 17 25 65 17 29 5
+data/Train/Video_pm/07170.npy	data/Train/Audio/07170.wav	라면은 스파	11 25 5 12 31 49 17 43 49 4 15 43 5 23 25 5
+data/Train/Video_pm/00935.npy	data/Train/Audio/00935.wav	한식이 최고지	24 25 49 15 45 46 17 45 5 4 20 36 5 6 33 5 18 45 5

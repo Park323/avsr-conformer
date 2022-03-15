@@ -6,7 +6,7 @@ def get_criterion(config, vocab):
     
     if config.model.name == 'las':
         criterion = Attention_Loss(config, vocab)
-    elif config.model.name in ['conf', 'conf_a']:
+    elif config.model.name in ['conf', 'conf_a', 'trans', 'trans_a']:
         if config.decoder.method=='att_only':
             criterion = Attention_Loss(config, vocab)
         elif config.decoder.method=='ctc_only':
@@ -81,7 +81,7 @@ class LabelSmoothingLoss(nn.Module):
     def forward(self, logit, target):
         logit = logit.view(-1, logit.shape[-1])
         with torch.no_grad():
-            label_smoothed = torch.zeros_like(logit).cuda()
+            label_smoothed = torch.zeros_like(logit).to(target.device)
             label_smoothed.fill_(self.smoothing / (self.vocab_size - 1))
             label_smoothed.scatter_(1, target.data.unsqueeze(1), self.confidence)
             label_smoothed[target == self.ignore_index, :] = 0

@@ -6,6 +6,7 @@ import torch.nn as nn
 
 import torch.distributed as dist
 import torch.multiprocessing as mp
+from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 import argparse
@@ -27,10 +28,6 @@ from torch.utils.data import DataLoader
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
     
-print("cuda : ", torch.cuda.is_available())
-print('Current cuda device:', torch.cuda.current_device())
-print('Count of using GPUs:', torch.cuda.device_count())
-    
 
 def setup(rank, world_size):
     os.environ['MASTER_ADDR'] = 'localhost'
@@ -39,30 +36,20 @@ def setup(rank, world_size):
     # 작업 그룹 초기화
     dist.init_process_group("gloo", rank=rank, world_size=world_size)
 
+
 def cleanup():
     dist.destroy_process_group()
-    
-def demo_basic(model, optimizer, rank, world_size):
-    print(f"Running basic DDP example on rank {rank}.")
-    setup(rank, world_size)
 
-    model = model.to(rank)
-    ddp_model = DDP(model, device_ids=[rank])
 
-    loss_fn = nn.MSELoss()
-    optimizer = optim.SGD(ddp_model.parameters(), lr=0.001)
-
-    optimizer.zero_grad()
-    outputs = ddp_model(torch.randn(20, 10))
-    labels = torch.randn(20, 5).to(rank)
-    loss_fn(outputs, labels).backward()
-    optimizer.step()
-
-    cleanup()
+def run_mp(fn, world_size, *args):
+    mp.spawn(fn,
+             args = (world_size, *args),
+             nprocs=world_size,
+             join=True)
     
     
     
-def train(config, model, dataloader, optimizer, scheduler, criterion, metric, vocab,
+def _train(config, model, dataloader, optimizer, criterion, metric, vocab,
                     train_begin_time, epoch, summary, device='cuda'):
     log_format = "epoch: {:4d}/{:4d}, step: {:4d}/{:4d}, loss: {:.6f}, " \
                               "cer: {:.2f}, elapsed: {:.2f}s {:.2f}m {:.2f}h, lr: {:.6f}"
@@ -94,15 +81,19 @@ def train(config, model, dataloader, optimizer, scheduler, criterion, metric, vo
         outputs = model(*model_args)
             
         loss_target = targets[:, 1:]
-        if config.decoder.method=='att_only':
-            loss_outputs = outputs[:,:-1]
-            metric_outputs = outputs
-        elif config.decoder.method=='ctc_only':
+        if config.model.name != 'las':
+            if config.decoder.method=='att_only':
+                loss_outputs = outputs[:,:-1]
+                metric_outputs = outputs
+            elif config.decoder.method=='ctc_only':
+                loss_outputs = outputs
+                metric_outputs = outputs
+            else:
+                loss_outputs = (outputs[0][:,:-1], outputs[1])
+                metric_outputs = outputs[0]
+        else:
             loss_outputs = outputs
             metric_outputs = outputs
-        else:
-            loss_outputs = (outputs[0][:,:-1], outputs[1])
-            metric_outputs = outputs[0]
         loss = criterion(loss_outputs, loss_target, target_lengths)
         
         cer = metric(loss_target, metric_outputs, show=False)
@@ -136,12 +127,16 @@ def train(config, model, dataloader, optimizer, scheduler, criterion, metric, vo
     summary.add_scalar('learning_rate/lr',optimizer.state_dict()['param_groups'][0]['lr'],epoch)
     train_loss, train_cer = epoch_loss_total / total_num, sum(cers) / len(cers)
     
-    if config.train.scheduler=='on':
-        scheduler.step(train_loss)
-    
     return train_loss, train_cer
 
-def main(config):
+
+
+#def train(rank, world_size, config):
+def train(config):
+    # multi processing
+    #print(f"Running DDP training on rank {rank}.")
+    #setup(rank, world_size)
+    
     # 시드 고정
     random.seed(config.train.seed)
     np.random.seed(config.train.seed)
@@ -163,26 +158,33 @@ def main(config):
         if config.train.multi_gpu == True:
             model = nn.DataParallel(model)
         model = model.to(device)
+#        model = model.to(rank)
+#        model = DDP(model, device_ids=[rank], find_unused_parameters=True)
         optimizer = torch.optim.Adam(model.parameters(), lr=config.train.learning_rate)
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, patience=5)
    
     else: # 학습한 경우가 있으면,
+#        model = model.to(rank)
+#        model = DDP(model, device_ids=[rank], find_unused_parameters=True)
         checkpoint = Checkpoint(config=config)
         latest_checkpoint_path = checkpoint.get_latest_checkpoint()
         resume_checkpoint = checkpoint.load(latest_checkpoint_path) ##N번째 epoch부터 학습하기
         model = resume_checkpoint.model
         optimizer = resume_checkpoint.optimizer
         scheduler = resume_checkpoint.scheduler
-        start_epoch = resume_checkpoint.epoch
+        start_epoch = resume_checkpoint.epoch        
         if isinstance(model, nn.DataParallel):
             model = model.module
         if config.train.multi_gpu == True:
+#            model = model.to(device)
+#            model = model.to(rank)
+#            model = DDP(model, device_ids=[rank], find_unused_parameters=True)
             model = nn.DataParallel(model)
         model = model.to(device)
         print(f'Loaded train logs, start from {resume_checkpoint.epoch+1} epoch')
-        model.config = config
-        optimizer = torch.optim.Adam(model.parameters(), lr=config.train.learning_rate)
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, patience=5)
+        #model.config = config
+        #optimizer = torch.optim.Adam(model.parameters(), lr=config.train.learning_rate)
+        #scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, patience=5)
     
     criterion = get_criterion(config, vocab)
     train_metric = get_metric(config, vocab)
@@ -194,9 +196,17 @@ def main(config):
 
     trainset = prepare_dataset(config, config.train.transcripts_path_train, vocab, Train=True)
     
+#    sampler = DistributedSampler(trainset, world_size, rank)
+#    mp_context = torch.multiprocessing.get_context('fork')
+#    collate_fn = lambda batch: _collate_fn(batch, config)
+#    train_loader = torch.utils.data.DataLoader(dataset=trainset, batch_size=config.train.batch_size,
+#                                               collate_fn = collate_fn, 
+#                                               multiprocessing_context=mp_context,
+#                                               sampler=sampler,
+#                                               num_workers=config.train.num_workers)
     collate_fn = lambda batch: _collate_fn(batch, config)
     train_loader = torch.utils.data.DataLoader(dataset=trainset, batch_size=config.train.batch_size,
-                                               shuffle=True, collate_fn = collate_fn, 
+                                               collate_fn = collate_fn, shuffle=True,
                                                num_workers=config.train.num_workers)
     
     print(f'trainset : {len(trainset)}, {len(train_loader)} batches')
@@ -206,10 +216,13 @@ def main(config):
     gpu_usage()
     print('Train start')
     for epoch in range(start_epoch, config.train.num_epochs):
-    
-        train_loss, train_cer = train(config, model, train_loader, 
-                                      optimizer, scheduler, criterion, train_metric, vocab,
-                                      train_begin_time, epoch, summary, device)
+        #dist.barrier()
+        #train_loss, train_cer = _train(config, model, train_loader, 
+        #                              optimizer, criterion, train_metric, vocab,
+        #                              train_begin_time, epoch, summary, device=rank)
+        train_loss, train_cer = _train(config, model, train_loader, 
+                                      optimizer, criterion, train_metric, vocab,
+                                      train_begin_time, epoch, summary, device=device)
         
         tr_sentences = 'Epoch %d Training Loss %0.4f CER %0.5f '% (epoch+1, train_loss, train_cer)
         
@@ -219,7 +232,13 @@ def main(config):
         print(tr_sentences)
         train_metric.reset()
         
+        if config.train.scheduler=='on':
+            scheduler.step(train_loss)
+        #if rank == 0:
         Checkpoint(model, optimizer, scheduler, epoch+1, config=config).save()
+        
+    #cleanup()
+
 
 
 def test(config):
@@ -295,6 +314,18 @@ def test(config):
             # )
             
     print(f'Mean Loss : {loss/(i+1)} Mean CER : {cer/(i+1)}')
+
+
+
+def main(config):
+    print("cuda : ", torch.cuda.is_available())
+    print('Current cuda device:', torch.cuda.current_device())
+    print('Count of using GPUs:', torch.cuda.device_count())
+    
+    #world_size = 2
+    #run_mp(train, world_size, config)
+    train(config)
+    
 
 
 def get_args():

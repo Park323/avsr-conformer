@@ -158,7 +158,7 @@ class KsponSpeechVocabulary(Vocabulary):
                 if label.item() == self.eos_id:
                     break
                 #elif label.item() == self.unk_id:
-                elif label.item() == self.unk_id or label.item()==int(self.vocab_dict['<emp>']): # att_1, ctc_2
+                elif label.item() == self.unk_id or label.item()==int(self.vocab_dict.get('<emp>',-1)): # att_1, ctc_2
                     #print(label.item()) # att_1, ctc_2
                     continue
                 if tolist:

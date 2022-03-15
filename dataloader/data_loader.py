@@ -96,11 +96,15 @@ class AV_Dataset(Dataset):
         self.config = config
         
         if config.audio.transform_method.lower() == 'fbank':
-            self.transforms = FilterBank(config.audio.sample_rate, 
-                                            config.audio.n_mels, 
-                                            config.audio.frame_length, 
-                                            config.audio.frame_shift,
-                                            )
+            def filterbank(x):
+                x = FilterBank(config.audio.sample_rate, 
+                            config.audio.n_mels, 
+                            config.audio.frame_length, 
+                            config.audio.frame_shift,
+                            )(x)
+                x = np.transpose(x, (1,0))
+                return x
+            self.transforms = filterbank
         elif config.audio.transform_method.lower() == 'raw':
             self.transforms = lambda x: np.expand_dims(x,1)
             
@@ -142,9 +146,7 @@ class AV_Dataset(Dataset):
         # if self.noise_syn:
         #     signal = self.noise_syn(signal,is_path=False)
         signal = signal.numpy().reshape(-1,)
-
         feature = self.transforms(signal)
-        
         if self.normalize:
             feature -= feature.mean()
             feature /= np.std(feature)
@@ -153,7 +155,6 @@ class AV_Dataset(Dataset):
 
         if augment_method == self.SPEC_AUGMENT:
             feature = self.spec_augment(feature)
-
         return feature
     
     def parse_video(self, video_path: str):

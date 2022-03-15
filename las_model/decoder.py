@@ -5,6 +5,7 @@ from torch.autograd import Variable
 import torch.nn.functional as F
 from las_model.ksponspeech import KsponSpeechVocabulary
 from las_model.layers import DotProductAttention, MultiHeadAttention
+import pdb
 
 class Speller(nn.Module):
 
@@ -128,7 +129,7 @@ class Speller(nn.Module):
         else:
             for step in range(max_step):
                 logit, hc, context = self.forward_step(inputs, hc, encoder_outputs)
-                logits.append(logit.squeeze())
+                logits.append(logit.squeeze(1))
                 if teacher_forcing:
                     output_word = targets[:, step + 1:step + 2]
                 else:

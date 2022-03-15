@@ -266,7 +266,7 @@ class AudioConformer(BaseConformer):
         features  = self.audio(audio_inputs)
         return features
 
-    
+
 class TransformerDecoder(nn.Module):
     '''
     Inputs : (B x S x E), (B x T x E)
@@ -278,7 +278,7 @@ class TransformerDecoder(nn.Module):
         self.decoder = nn.TransformerDecoder(decoder, config.decoder.n_layers)
         
     def forward(self, labels, inputs, train=True, pad_id=None, **kwargs):
-        label_mask = nn.Transformer.generate_square_subsequent_mask(labels.shape[1]).to(inputs.device)
+        label_mask = self.generate_square_subsequent_mask(labels.shape[1]).to(inputs.device)
         label_pad_mask = self.get_attn_pad_mask(torch.argmax(labels, dim=-1), pad_id) if pad_id else None
         
         labels = labels.permute(1,0,2)
@@ -290,6 +290,11 @@ class TransformerDecoder(nn.Module):
         
         outputs=outputs.permute(1,0,2)
         return outputs
+        
+    def generate_square_subsequent_mask(self, sz):
+        mask = torch.full((sz, sz),-float('inf'))
+        mask = torch.triu(mask, diagonal=1)
+        return mask
         
     def get_attn_pad_mask(self, seq, pad):
         batch_size, len_seq = seq.size()
@@ -369,12 +374,20 @@ class VisualBackEnd(nn.Module):
     '''
     def __init__(self, config):
         super().__init__()
-        self.conformer = ConformerEncoder(config.encoder.d_model, config.encoder.d_model, 
-                                          config.encoder.n_layers, config.encoder.n_head, input_dropout_p=config.encoder.dropout_p)
-        self.layers = nn.Sequential(*self.conformer.layers)
+        self.is_transformer = config.encoder.method == 'transformer'
+        if config.encoder.method == 'transformer':
+            encoder = nn.TransformerEncoderLayer(config.encoder.d_model, config.encoder.n_head, 
+                                             config.decoder.ff_dim, config.encoder.dropout_p)
+            self.layers = nn.TransformerEncoder(encoder, config.encoder.n_layers)
+        else:
+            self.conformer = ConformerEncoder(config.encoder.d_model, config.encoder.d_model, 
+                                              config.encoder.n_layers, config.encoder.n_head, input_dropout_p=config.encoder.dropout_p)
+            self.layers = nn.Sequential(*self.conformer.layers)
         
     def forward(self, inputs, input_lengths):
+        self.is_transformer: inputs = inputs.permute(1,0,2)
         outputs = self.layers(inputs)
+        self.is_transformer: outputs = outputs.permute(1,0,2)
         return outputs
         
 class AudioFeatureExtractor(nn.Module):
@@ -426,12 +439,20 @@ class AudioBackEnd(nn.Module):
     '''
     def __init__(self, config):
         super().__init__()
-        self.conformer = ConformerEncoder(config.encoder.d_model, config.encoder.d_model, 
-                                          config.encoder.n_layers, config.encoder.n_head, input_dropout_p=config.encoder.dropout_p)
-        self.layers = nn.Sequential(*self.conformer.layers)
+        self.is_transformer = config.encoder.method == 'transformer'
+        if config.encoder.method == 'transformer':
+            encoder = nn.TransformerEncoderLayer(config.encoder.d_model, config.encoder.n_head, 
+                                             config.decoder.ff_dim, config.encoder.dropout_p)
+            self.layers = nn.TransformerEncoder(encoder, config.encoder.n_layers)
+        else:
+            self.conformer = ConformerEncoder(config.encoder.d_model, config.encoder.d_model, 
+                                              config.encoder.n_layers, config.encoder.n_head, input_dropout_p=config.encoder.dropout_p)
+            self.layers = nn.Sequential(*self.conformer.layers)
         
     def forward(self, inputs, input_lengths):
+        self.is_transformer: inputs = inputs.permute(1,0,2)
         outputs = self.layers(inputs)
+        self.is_transformer: outputs = outputs.permute(1,0,2)
         return outputs
    
    
