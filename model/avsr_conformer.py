@@ -267,6 +267,20 @@ class AudioConformer(BaseConformer):
         return features
 
 
+class VideoConformer(BaseConformer):
+    def __init__(self, config, vocab):
+        super().__init__(config, vocab)
+        self.video = VisualFeatureExtractor(config)
+        
+    def encode(self, 
+               video_inputs, video_input_lengths,
+               audio_inputs, audio_input_lengths,
+               targets=None, target_lengths=None, 
+               *args, **kwargs):
+        features  = self.video(video_inputs, video_input_lengths)
+        return features
+
+
 class TransformerDecoder(nn.Module):
     '''
     Inputs : (B x S x E), (B x T x E)

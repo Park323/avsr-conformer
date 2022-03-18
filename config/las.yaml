@@ -16,7 +16,7 @@ train:
     exp_day : 'las_1'
 
     ### TRAIN ###
-    num_epochs : 50
+    num_epochs : 200
     batch_size : 1
     scheduler : 'on'
     learning_rate : 0.0001

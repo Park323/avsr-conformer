@@ -3,7 +3,7 @@ import torch.nn as nn
 from omegaconf import DictConfig
 from dataloader.vocabulary import Vocabulary
 from las_model.las import ListenAttendSpell
-from model.avsr_conformer import AudioVisualConformer, AudioConformer
+from model.avsr_conformer import AudioVisualConformer, AudioConformer, VideoConformer
 
 import pdb
 
@@ -18,6 +18,8 @@ def build_model(config, vocab):
         model = build_conf_model(config, 'multi', vocab=vocab)
     elif model_name in ['conf_a','trans_a']:
         model = build_conf_model(config, 'audio', vocab=vocab)
+    elif model_name in ['conf_v','trans_v']:
+        model = build_conf_model(config, 'video', vocab=vocab)
         
     print("model parameter ")
     print(count_parameters(model))
@@ -31,4 +33,7 @@ def build_conf_model(config, mode, vocab=None, *args, **kargs):
         model = AudioVisualConformer(config, vocab)
     elif mode=='audio':
         model = AudioConformer(config, vocab)
+    elif mode=='video':
+        print('VideoConformer')
+        model = VideoConformer(config, vocab)
     return model

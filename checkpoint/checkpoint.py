@@ -38,7 +38,8 @@ class Checkpoint(object):
         if not os.path.exists(self.SAVE_PATH):
             os.makedirs(self.SAVE_PATH)
         
-        torch.save(self.model, os.path.join(self.SAVE_PATH, 'checkpoint_epoch_'+str(self.epoch)+'.pt'))
+        if self.epoch % 10 == 0:
+            torch.save(self.model, os.path.join(self.SAVE_PATH, 'checkpoint_epoch_'+str(self.epoch)+'.pt'))
         torch.save(trainer_states, os.path.join(self.SAVE_PATH, self.TRAINER_STATE_NAME))
         torch.save(self.model, os.path.join(self.SAVE_PATH, self.LAST_MODEL))
 

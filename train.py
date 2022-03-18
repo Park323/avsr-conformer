@@ -24,6 +24,7 @@ from metric.metric import *
 from metric.loss import *
 from checkpoint.checkpoint import Checkpoint
 from torch.utils.data import DataLoader
+from scheduler import CosineAnnealingWarmUpRestarts, NoamLR
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
@@ -49,7 +50,7 @@ def run_mp(fn, world_size, *args):
     
     
     
-def _train(config, model, dataloader, optimizer, criterion, metric, vocab,
+def _train(config, model, dataloader, optimizer, scheduler, criterion, metric, vocab,
                     train_begin_time, epoch, summary, device='cuda'):
     log_format = "epoch: {:4d}/{:4d}, step: {:4d}/{:4d}, loss: {:.6f}, " \
                               "cer: {:.2f}, elapsed: {:.2f}s {:.2f}m {:.2f}h, lr: {:.6f}"
@@ -123,6 +124,8 @@ def _train(config, model, dataloader, optimizer, criterion, metric, vocab,
             
         summary.add_scalar('iter_training/loss',loss,epoch*len(dataloader)+i)
         summary.add_scalar('iter_training/cer',cer,epoch*len(dataloader)+i)
+        
+        scheduler.step()
     
     summary.add_scalar('learning_rate/lr',optimizer.state_dict()['param_groups'][0]['lr'],epoch)
     train_loss, train_cer = epoch_loss_total / total_num, sum(cers) / len(cers)
@@ -160,8 +163,17 @@ def train(config):
         model = model.to(device)
 #        model = model.to(rank)
 #        model = DDP(model, device_ids=[rank], find_unused_parameters=True)
-        optimizer = torch.optim.Adam(model.parameters(), lr=config.train.learning_rate)
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, patience=5)
+        optimizer = torch.optim.Adam(model.parameters(), lr=1e-13)
+        scheduler = NoamLR(optimizer, 
+                          [2.5], 
+                          [config.train.num_epochs],
+                          [10000],
+                          [1e-13],
+                          [config.train.learning_rate],
+                          [1e-7])
+#        scheduler = CosineAnnealingWarmUpRestarts(optimizer, T_0=50, T_mult=1, eta_max=config.train.learning_rate, T_up=3, gamma=0.5)
+#        optimizer = torch.optim.Adam(model.parameters(), lr=config.train.learning_rate)
+#        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, patience=5)
    
     else: # 학습한 경우가 있으면,
 #        model = model.to(rank)
@@ -182,9 +194,6 @@ def train(config):
             model = nn.DataParallel(model)
         model = model.to(device)
         print(f'Loaded train logs, start from {resume_checkpoint.epoch+1} epoch')
-        #model.config = config
-        #optimizer = torch.optim.Adam(model.parameters(), lr=config.train.learning_rate)
-        #scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, patience=5)
     
     criterion = get_criterion(config, vocab)
     train_metric = get_metric(config, vocab)
@@ -221,7 +230,7 @@ def train(config):
         #                              optimizer, criterion, train_metric, vocab,
         #                              train_begin_time, epoch, summary, device=rank)
         train_loss, train_cer = _train(config, model, train_loader, 
-                                      optimizer, criterion, train_metric, vocab,
+                                      optimizer, scheduler, criterion, train_metric, vocab,
                                       train_begin_time, epoch, summary, device=device)
         
         tr_sentences = 'Epoch %d Training Loss %0.4f CER %0.5f '% (epoch+1, train_loss, train_cer)
@@ -232,8 +241,8 @@ def train(config):
         print(tr_sentences)
         train_metric.reset()
         
-        if config.train.scheduler=='on':
-            scheduler.step(train_loss)
+#        if config.train.scheduler=='on':
+#            scheduler.step(train_loss)
         #if rank == 0:
         Checkpoint(model, optimizer, scheduler, epoch+1, config=config).save()
         
@@ -252,7 +261,7 @@ def test(config):
     vocab = KsponSpeechVocabulary(config.train.vocab_label)
 
     model = torch.load(config.model.model_path, map_location=lambda storage, loc: storage).to(device)
-    model.config.model.max_len = config.model.max_len # 
+    #model.config.model.max_len = config.model.max_len # 
     model.eval()
     
     criterion = Attention_Loss(config, vocab)
@@ -276,7 +285,7 @@ def test(config):
     
     loss = 0.
     cer = 0.
-    
+    cer_js = 0.
     with torch.no_grad():
         # progress_bar = tqdm(enumerate(valid_loader),ncols=110)
         progress_bar = enumerate(valid_loader)
@@ -301,10 +310,13 @@ def test(config):
             batch_loss = criterion(loss_outputs, loss_target, target_lengths).cpu().item()
             print()
             batch_cer = metric(loss_target, loss_outputs, show=True)
+            metric.reset()
             if config.model.use_jaso:
                 batch_cer_jaso = metric_jaso(loss_target, loss_outputs, 
                                              target_lengths, output_lengths, show=True)
                 print(f'CER : {batch_cer}  /  CER_JASO : {batch_cer_jaso}')
+                cer_js += batch_cer_jaso
+                metric_jaso.reset()
                 
             loss += batch_loss
             cer += batch_cer
@@ -312,8 +324,10 @@ def test(config):
             # progress_bar.set_description(
             #     f'{i+1}/{len(valid_loader)}, Loss:{batch_loss} CER:{batch_cer}'
             # )
-            
-    print(f'Mean Loss : {loss/(i+1)} Mean CER : {cer/(i+1)}')
+    if config.model.use_jaso:
+        print(f'Mean Loss : {loss/(i+1)} Mean CER : {cer/(i+1)}')
+    else:
+        print(f'Mean Loss : {loss/(i+1)} Mean CER : {cer/(i+1)} Mean CER JASO : {cer_js/(i+1)}')
 
 
 

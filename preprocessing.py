@@ -109,6 +109,8 @@ def generate_character_script(videos_paths, audios_paths, transcripts, test=Fals
             f1 = open(os.path.join('./dataset/'+mode+".txt"), "w")
             f2 = open(os.path.join('./dataset/'+mode+"_js.txt"), "w")
             
+            if not tmp:
+                continue
             videos_paths,audios_paths, transcripts = zip(*tmp)
             for video_path, audio_path,transcript in zip(videos_paths, audios_paths, transcripts):
                 char_id_transcript = sentence_to_target(transcript, char2id)

@@ -6,7 +6,7 @@ def get_criterion(config, vocab):
     
     if config.model.name == 'las':
         criterion = Attention_Loss(config, vocab)
-    elif config.model.name in ['conf', 'conf_a', 'trans', 'trans_a']:
+    elif config.model.name in ['conf', 'conf_a', 'conf_v', 'trans', 'trans_a']:
         if config.decoder.method=='att_only':
             criterion = Attention_Loss(config, vocab)
         elif config.decoder.method=='ctc_only':
