@@ -59,6 +59,7 @@ def prepare_dataset(config, transcripts_path: str, vocab: Vocabulary, Train=True
                 sos_id=vocab.sos_id, 
                 eos_id=vocab.eos_id,
                 config=config,
+                noise_augment=True
                 )
     elif Train == False:
         trainset = AV_Dataset(
@@ -90,18 +91,20 @@ class AV_Dataset(Dataset):
             eos_id: int,                    # identification of end of sequence token
             config,             # set of arguments
             spec_augment: bool = False,     # flag indication whether to use spec-augmentation of not
+            noise_augment: bool = False,     # flag indication whether to use spec-augmentation of not
             ):
         super(AV_Dataset, self).__init__()
         
         self.config = config
         
         if config.audio.transform_method.lower() == 'fbank':
+            self.filterbank = FilterBank(config.audio.sample_rate, 
+                                config.audio.n_mels, 
+                                config.audio.frame_length, 
+                                config.audio.frame_shift,
+                                )
             def filterbank(x):
-                x = FilterBank(config.audio.sample_rate, 
-                            config.audio.n_mels, 
-                            config.audio.frame_length, 
-                            config.audio.frame_shift,
-                            )(x)
+                x = self.filterbank(x)
                 x = np.transpose(x, (1,0))
                 return x
             self.transforms = filterbank
@@ -119,15 +122,20 @@ class AV_Dataset(Dataset):
         self.normalize = config.audio.normalize
 
         self.VANILLA = 0           # Not apply augmentation
-        self.SPEC_AUGMENT = 1      # SpecAugment
+        self.SPEC_AUGMENT = 1      # 1 : SpecAugment, 2: NoiseAugment, 3: Both
+        self.NOISE_AUGMENT = 2
+        self.BOTH_AUGMENT = 3
         self.augment_methods = [self.VANILLA] * len(self.audio_paths)
+        #self.augment_methods = np.random.choice([0,1,2,3], len(self.audio_paths), p=[0.6, 0.15, 0.15, 0.1])
         
         self.spec_augment = SpecAugment(config.audio.freq_mask_para, 
                                     config.audio.time_mask_num, 
                                     config.audio.freq_mask_num,
                                     )
+        self.noise_augment = BackgroundNoise(config.train.noise_path, 
+                                            self.config.audio.sample_rate)
 
-        self._augment(spec_augment)
+        self._augment(spec_augment, noise_augment)
 
     def __getitem__(self, index):
         if self.config.video.use_vid:
@@ -143,9 +151,11 @@ class AV_Dataset(Dataset):
     def parse_audio(self,audio_path: str, augment_method):
         # pdb.set_trace()
         signal, _ = get_sample(audio_path,resample=self.config.audio.sample_rate)
-        # if self.noise_syn:
-        #     signal = self.noise_syn(signal,is_path=False)
         signal = signal.numpy().reshape(-1,)
+        
+        if augment_method in [self.NOISE_AUGMENT, self.BOTH_AUGMENT]:
+            signal = self.noise_augment(signal, is_path=False)
+            
         feature = self.transforms(signal)
         if self.normalize:
             feature -= feature.mean()
@@ -153,19 +163,23 @@ class AV_Dataset(Dataset):
 
         feature = FloatTensor(feature)
 
-        if augment_method == self.SPEC_AUGMENT:
+        if augment_method in [self.SPEC_AUGMENT, self.BOTH_AUGMENT]:
             feature = self.spec_augment(feature)
+            
         return feature
     
     def parse_video(self, video_path: str):
         if self.config.video.use_npz:
-            video = np.load(video_path)['video']
+            if self.config.train.transcripts_path_train.replace('.txt','').split('_')[-1]=='lip':
+                video = np.load(video_path)['data']
+            else:
+                video = np.load(video_path)['video']
+                video = video.transpose(1,0)
         else:
             video = np.load(video_path)
         video = torch.from_numpy(video).float()
         video -= torch.mean(video)
         video /= torch.std(video)
-        video_feature  = video if self.config.video.use_raw_vid=='on' else video.permute(1,0)
         return video_feature
 
     def parse_transcript(self, transcript):
@@ -191,19 +205,26 @@ class AV_Dataset(Dataset):
 
         return korean_transcript
 
-    def _augment(self, spec_augment):
+    def _augment(self, spec_augment, noise_augment):
         """ Spec Augmentation """
-        if spec_augment:
-            print("Applying Spec Augmentation...")
-
+        if not spec_augment and not noise_augment:
+            available_augment = None
+        elif not noise_augment:
+            available_augment = [1]
+        elif not spec_augment:
+            available_augment = [2]
+        else :
+            available_augment = [1,2,3]
+        if available_augment:
+            print(f"Applying Augmentation...{self.dataset_size}")
             for idx in range(self.dataset_size):
-                self.augment_methods.append(self.SPEC_AUGMENT)
+                self.augment_methods.append(np.random.choice(available_augment))
                 self.video_paths.append(self.video_paths[idx])
                 self.audio_paths.append(self.audio_paths[idx])
                 self.korean_transcripts.append(self.korean_transcripts[idx])
                 self.transcripts.append(self.transcripts[idx])
 
-            print("Spec Augmentation Finished")
+            print(f"Augmentation Finished...{len(self.audio_paths)}")
 
     def shuffle(self):
         """ Shuffle dataset """

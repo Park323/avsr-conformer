@@ -1,4 +1,4 @@
-import os
+import os, pdb
 import random
 import math
 
@@ -51,28 +51,21 @@ def get_sample(path, resample=None):
 
 class BackgroundNoise(object):
     def __init__(self,noise_path:str,sr:int):
-        np.random.seed(1)
-        random.seed(1)
-
         self.sr = sr
-        self.noise_path = noise_path
-        if noise_path[-1] != '/':
-            self.noise_path += '/'
-        self.noise_list = os.listdir(noise_path)
-        self.noise_wav = []
+        self.noise_path = noise_path if noise_path[-1] == '/' else noise_path + '/'
+        self.noises = []
         print("Load Background Noise Data")
-        for file in tqdm.tqdm(self.noise_list):
-          bg,_ = get_sample(self.noise_path+file,self.sr)
-          self.noise_wav.append(bg)
+        for file in tqdm.tqdm(os.listdir(noise_path)):
+          bg, _ = get_sample(self.noise_path+file,self.sr)
+          self.noises.append(bg)
+          break
         print("Complete!")
     
     def __call__(self,audio,is_path=True):
-        
-        idx = np.random.randint(len(self.noise_list))
-        noise = self.noise_wav[idx]
+        noise = np.random.choice(self.noises)
         if is_path:
           audio, _ = get_sample(audio,self.sr)
-          
+        
         noise_len = noise.shape[1]
         audio_len = audio.shape[1]
 
