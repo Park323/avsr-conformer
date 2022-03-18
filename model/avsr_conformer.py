@@ -226,6 +226,7 @@ class BaseConformer(nn.Module):
 class AudioVisualConformer(BaseConformer):
     def __init__(self, config, vocab):
         super().__init__(config, vocab)
+        self.config = config
         self.fusion = FusionModule(config)
         self.visual = VisualFeatureExtractor(config)
         self.audio  = AudioFeatureExtractor(config)
@@ -237,20 +238,28 @@ class AudioVisualConformer(BaseConformer):
         video_inputs, audio_inputs = self.match_seq(video_inputs, audio_inputs)
         audioFeatures  = self.audio(audio_inputs)
         visualFeatures = self.visual(video_inputs,
-                                     video_input_lengths,
-                                     use_raw_vid=self.config.video.use_raw_vid)
+                                     video_input_lengths)
         outputs = self.fusion(visualFeatures, audioFeatures)
         return outputs
     
     def match_seq(self, video_inputs, audio_inputs):
-        vid_len = video_inputs.size(2) if self.config.video.use_raw_vid=='on' else video_inputs.size(1)
+        if 'lip' in self.config.train.transcripts_path_train:
+            extend_length = int(video_inputs.size(1) * 30 / 29)
+            extend_matrix = torch.zeros((video_inputs.size(0), extend_length, video_inputs.size(2)), device=video_inputs.device)
+            for i in range(video_inputs.size(1) // 29):
+                extend_matrix[:,i*30] = video_inputs[:,i*29] 
+                extend_matrix[:,i*30+1:(i+1)*30] = video_inputs[:,i*29:(i+1)*29]
+            _video_inputs = extend_matrix
+        else:
+            _video_inputs = video_inputs
+        vid_len = _video_inputs.size(2) if self.config.video.use_raw_vid=='on' else _video_inputs.size(1)
         aud_seq_len = vid_len * 480
         if aud_seq_len <= audio_inputs.size(2):
             audio_outputs = audio_inputs[:, :, :aud_seq_len]
         else:
             pad = torch.zeros([*audio_inputs.shape[:2], aud_seq_len-audio_inputs.size(2)]).to(audio_inputs.device)
             audio_outputs = torch.cat([audio_inputs, pad], dim=2)
-        return video_inputs, audio_outputs
+        return _video_inputs, audio_outputs
 
 
 class AudioConformer(BaseConformer):
@@ -327,8 +336,6 @@ class FusionModule(nn.Module):
         )
         
     def forward(self, visualFeatures, audioFeatures):
-        if visualFeatures.size(1) != audioFeatures.size(1):
-            visualFeatures = torch.repeat_interleave(visualFeatures, 2, dim=1)
         features = torch.cat([visualFeatures, audioFeatures], dim=-1)
         batch_seq_size = features.shape[:2]
         features = torch.flatten(features, end_dim=1)
@@ -340,14 +347,20 @@ class FusionModule(nn.Module):
 class VisualFeatureExtractor(nn.Module):
     def __init__(self, config):
         super().__init__()
+        self.config = config
         self.front = VisualFrontEnd(config)
         self.back  = VisualBackEnd(config)
+        self.linear = nn.Linear(512, 256)
         
-    def forward(self, inputs, input_lengths, use_raw_vid='on'):
-        if use_raw_vid=='on':
+    def forward(self, inputs, input_lengths):
+        if self.config.video.use_raw_vid=='on':
             outputs = self.front(inputs)
-        else:
+        else : 
             outputs = inputs
+        if 'lip' in self.config.train.transcripts_path_train:
+            outputs = self.linear(outputs)
+        else:
+            pass
         outputs = self.back(outputs, input_lengths)
         return outputs
         

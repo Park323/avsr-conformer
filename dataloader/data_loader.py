@@ -170,7 +170,7 @@ class AV_Dataset(Dataset):
     
     def parse_video(self, video_path: str):
         if self.config.video.use_npz:
-            if self.config.train.transcripts_path_train.replace('.txt','').split('_')[-1]=='lip':
+            if 'lip' in self.config.train.transcripts_path_train:
                 video = np.load(video_path)['data']
             else:
                 video = np.load(video_path)['video']
@@ -180,6 +180,7 @@ class AV_Dataset(Dataset):
         video = torch.from_numpy(video).float()
         video -= torch.mean(video)
         video /= torch.std(video)
+        video_feature = video
         return video_feature
 
     def parse_transcript(self, transcript):

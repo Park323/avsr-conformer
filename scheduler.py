@@ -1,4 +1,5 @@
 import math
+import numpy as np
 from torch.optim.lr_scheduler import _LRScheduler
 
 class CosineAnnealingWarmUpRestarts(_LRScheduler):
@@ -68,13 +69,13 @@ class NoamLR(_LRScheduler):
     schedule from Attention is All You Need, section 5.3 (https://arxiv.org/abs/1706.03762).
     """
     def __init__(self,
-                 optimizer: Optimizer,
-                 warmup_epochs: List[Union[float, int]],
-                 total_epochs: List[int],
+                 optimizer,
+                 warmup_epochs,
+                 total_epochs,
                  steps_per_epoch: int,
-                 init_lr: List[float],
-                 max_lr: List[float],
-                 final_lr: List[float]):
+                 init_lr,
+                 max_lr,
+                 final_lr):
         """
         Initializes the learning rate scheduler.
 
@@ -109,7 +110,7 @@ class NoamLR(_LRScheduler):
 
         super(NoamLR, self).__init__(optimizer)
 
-    def get_lr(self) -> List[float]:
+    def get_lr(self):
         """Gets a list of the current learning rates."""
         return list(self.lr)
 

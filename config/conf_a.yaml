@@ -5,21 +5,21 @@ train:
     num_workers : 1
 
     ### DATASET ###
-    transcripts_path_train : 'dataset/Train.txt'
-    transcripts_path_valid : 'dataset/Valid.txt'
+    transcripts_path_train : 'dataset/Train_lip.txt'
+    transcripts_path_valid : 'dataset/Test_lip.txt'
     vocab_label : 'dataset/labels.csv'
-    noise_path : 'data_folder/Noise'
+    noise_path : 'data/Noise'
 
     ### STATUS ###
     checkpoint_every : 500  #train 중간마다 저장
     print_every : 5        #iteration 출력 업데이트 주기
-    exp_day : 'finalAtt'
+    exp_day : 's3ag_hybrid'
 
     ### TRAIN ###
-    num_epochs : 100
+    num_epochs : 50
     batch_size : 5
     scheduler : 'on'
-    learning_rate : 0.00001
+    learning_rate : 0.0001
 
 
 video:
@@ -87,6 +87,6 @@ decoder:
     dropout_p: 0.3
     n_layers : 6
 
-    method : att_only
+    method : hybrid
     use_beam: False
     beam_width : 1

@@ -5,26 +5,26 @@ train:
     num_workers : 1
 
     ### DATASET ###
-    transcripts_path_train : 'dataset/Train_.txt'
-    transcripts_path_valid : 'dataset/Valid_.txt'
+    transcripts_path_train : 'dataset/Train_lip.txt'
+    transcripts_path_valid : 'dataset/Test_lip.txt'
     vocab_label : 'dataset/labels.csv'
-    noise_path : 'data_folder/Noise'
+    noise_path : 'data/Noise'
 
     ### STATUS ###
     checkpoint_every : 500  #train 중간마다 저장
     print_every : 5        #iteration 출력 업데이트 주기
-    exp_day : 's2att_1'
+    exp_day : 's3avp_hybrid'
 
     ### TRAIN ###
-    num_epochs : 200
-    batch_size : 2
+    num_epochs : 50
+    batch_size : 4
     scheduler : 'on'
-    learning_rate : 0.00005
+    learning_rate : 0.0001
 
 
 video:
     use_vid: True
-    use_npz: False
+    use_npz: True
     use_raw_vid: 'off'
     n_channels : 3
     
@@ -53,19 +53,20 @@ model :
     split_balance : 0.1
     
     ## Language Model
-    use_jaso : True
-    max_len  : 280
+    use_jaso : False
+    max_len  : 120
 
     # Train
     label_smoothing: 0.0
-    alpha : 0.2 # attention rate
+    alpha : 0.9 # attention rate
     
 
 encoder:
     # Encoder
-    d_model : 512
+    method : 'conformer'
+    d_model : 256
     n_head : 8
-    n_layers: 6
+    n_layers: 12
     dropout_p: 0.1
     mask_conv: False
     fps: 30
@@ -80,12 +81,12 @@ encoder:
 
 decoder:
     # Decoder
-    d_model  : 512
+    d_model  : 256
     n_head   : 8
-    ff_dim   : 512
+    ff_dim   : 2048
     dropout_p: 0.3
-    n_layers : 12
+    n_layers : 6
 
-    method : att_only
+    method : hybrid
     use_beam: False
     beam_width : 1
