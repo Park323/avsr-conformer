@@ -5,8 +5,8 @@ train:
     num_workers : 1
 
     ### DATASET ###
-    transcripts_path_train : 'dataset/Train.txt'
-    transcripts_path_valid : 'dataset/Valid.txt'
+    transcripts_path_train : 'dataset/Train_.txt'
+    transcripts_path_valid : 'dataset/Valid_.txt'
     vocab_label : 'dataset/labels.csv'
     noise_path : 'data_folder/Noise'
 
@@ -19,7 +19,7 @@ train:
     num_epochs : 200
     batch_size : 2
     scheduler : 'on'
-    learning_rate : 0.0001
+    learning_rate : 0.00005
 
 
 video:
@@ -58,7 +58,7 @@ model :
 
     # Train
     label_smoothing: 0.0
-    alpha : 0.1 # attention rate
+    alpha : 0.2 # attention rate
     
 
 encoder:

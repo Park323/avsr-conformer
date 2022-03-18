@@ -2,7 +2,7 @@ train:
     ### GPU / WORKERS / SEED #####
     seed : 1023
     multi_gpu : True
-    num_workers : 4
+    num_workers : 1
 
     ### DATASET ###
     transcripts_path_train : 'dataset/Train.txt'
@@ -13,11 +13,11 @@ train:
     ### STATUS ###
     checkpoint_every : 500  #train 중간마다 저장
     print_every : 5        #iteration 출력 업데이트 주기
-    exp_day : 'tratt_1av'
+    exp_day : 's2hybrid_1ov'
 
     ### TRAIN ###
     num_epochs : 200
-    batch_size : 4
+    batch_size : 5
     scheduler : 'on'
     learning_rate : 0.00005
 
@@ -25,7 +25,7 @@ train:
 video:
     use_vid: True
     use_npz: False
-    use_raw_vid: 'off'
+    use_raw_vid: 'on'
     n_channels : 3
     
     
@@ -47,7 +47,7 @@ audio:
 
 model : 
     ## My Model config ##
-    name : trans
+    name : conf_v
     feature: logmelspectrogram
     use_npy: False
     split_balance : 0.1
@@ -58,15 +58,15 @@ model :
 
     # Train
     label_smoothing: 0.0
-    alpha : 0.2 # attention rate
+    alpha : 0.9 # attention rate
     
 
 encoder:
     # Encoder
-    method : 'transformer'
-    d_model : 512
+    method : 'conformer'
+    d_model : 256
     n_head : 8
-    n_layers: 6
+    n_layers: 12
     dropout_p: 0.1
     mask_conv: False
     fps: 30
@@ -81,12 +81,12 @@ encoder:
 
 decoder:
     # Decoder
-    d_model  : 512
+    d_model  : 256
     n_head   : 8
-    ff_dim   : 512
+    ff_dim   : 2048
     dropout_p: 0.3
-    n_layers : 12
+    n_layers : 6
 
-    method : att_only
+    method : hybrid
     use_beam: False
     beam_width : 1

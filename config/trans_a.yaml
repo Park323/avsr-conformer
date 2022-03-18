@@ -13,13 +13,13 @@ train:
     ### STATUS ###
     checkpoint_every : 500  #train 중간마다 저장
     print_every : 5        #iteration 출력 업데이트 주기
-    exp_day : 'trhybrid_1'
+    exp_day : 'tratt_2'
 
     ### TRAIN ###
-    num_epochs : 100
-    batch_size : 2
+    num_epochs : 200
+    batch_size : 8
     scheduler : 'on'
-    learning_rate : 0.00005
+    learning_rate : 0.00001
 
 
 video:
@@ -57,7 +57,7 @@ model :
 
     # Train
     label_smoothing: 0.0
-    alpha : 0.2 # attention rate
+    alpha : 0.1 # attention rate
     
 
 encoder:
@@ -86,6 +86,6 @@ decoder:
     dropout_p: 0.3
     n_layers : 12
 
-    method : hybrid
+    method : att_only
     use_beam: False
     beam_width : 1
