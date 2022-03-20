@@ -58,24 +58,25 @@ class BackgroundNoise(object):
         for file in tqdm.tqdm(os.listdir(noise_path)):
           bg, _ = get_sample(self.noise_path+file,self.sr)
           self.noises.append(bg)
-          break
         print("Complete!")
     
     def __call__(self,audio,is_path=True):
-        noise = np.random.choice(self.noises)
+        noise_index = np.random.randint(len(self.noises))
+        noise = self.noises[noise_index]
         if is_path:
           audio, _ = get_sample(audio,self.sr)
-        
+          
         noise_len = noise.shape[1]
         audio_len = audio.shape[1]
 
         start = np.random.randint(noise_len-audio_len)
-        noise = noise[:, start:start+audio.shape[1]]
-
-        audio_power = audio.norm(p=2)
-        noise_power = noise.norm(p=2)
+        noise = noise[:, start:start+audio_len]#noise[:, start:start+audio.shape[1]]
+        
+        audio_power = np.linalg.norm(audio)#.norm(p=2)
+        noise_power = np.linalg.norm(noise)#.norm(p=2)
         
         snr_db = np.random.randint(low=0,high=20)
+        snr_db = 10
         if snr_db == 0:
             return audio
           
