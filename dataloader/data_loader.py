@@ -177,6 +177,8 @@ class AV_Dataset(Dataset):
                 video = video.transpose(1,0)
         else:
             video = np.load(video_path)
+            if self.config.video.use_raw_vid != 'on':
+                video = video.transpose(1,0)
         video = torch.from_numpy(video).float()
         video -= torch.mean(video)
         video /= torch.std(video)
