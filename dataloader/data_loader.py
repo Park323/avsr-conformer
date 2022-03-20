@@ -143,7 +143,7 @@ class AV_Dataset(Dataset):
         else:
             # return dummy video feature
             video_feature = torch.Tensor([[0]])
-        audio_feature = self.parse_audio(self.audio_paths[index],self.augment_methods)
+        audio_feature = self.parse_audio(self.audio_paths[index],self.augment_methods[index])
         transcript = self.parse_transcript(self.transcripts[index])
         korean_transcript = self.parse_korean_transcripts(self.korean_transcripts[index])
         return video_feature, audio_feature, transcript, korean_transcript,
@@ -151,11 +151,9 @@ class AV_Dataset(Dataset):
     def parse_audio(self,audio_path: str, augment_method):
         # pdb.set_trace()
         signal, _ = get_sample(audio_path,resample=self.config.audio.sample_rate)
-        signal = signal.numpy().reshape(-1,)
-        
         if augment_method in [self.NOISE_AUGMENT, self.BOTH_AUGMENT]:
             signal = self.noise_augment(signal, is_path=False)
-            
+        signal = signal.numpy().reshape(-1,)    
         feature = self.transforms(signal)
         if self.normalize:
             feature -= feature.mean()
@@ -211,11 +209,11 @@ class AV_Dataset(Dataset):
         if not spec_augment and not noise_augment:
             available_augment = None
         elif not noise_augment:
-            available_augment = [1]
+            available_augment = [self.SPEC_AUGMENT]
         elif not spec_augment:
-            available_augment = [2]
+            available_augment = [self.NOISE_AUGMENT]
         else :
-            available_augment = [1,2,3]
+            available_augment = [self.SPEC_AUGMENT,self.NOISE_AUGMENT,self.BOTH_AUGMENT]
         if available_augment:
             print(f"Applying Augmentation...{self.dataset_size}")
             for idx in range(self.dataset_size):
