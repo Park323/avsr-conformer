@@ -1,2 +1,9 @@
-# AVSR_NIA
- NIA데이터셋을 활용한 AudioVisual Recognition
+# AudioVisual_SpeechRecognition_with_Conformer
+---
+
+
+
+
+
+## Model
+![image](https://user-images.githubusercontent.com/42057488/169018201-cf8fee66-e111-4461-8570-372aebcec3be.png)
